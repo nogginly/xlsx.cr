@@ -1,0 +1,13 @@
+name: xlsx
+version: 0.1.0
+
+authors:
+  - nogginly <nogginly@icloud.com>
+
+license: MIT
+
+development_dependencies:
+  ameba:
+    github: crystal-ameba/ameba
+  spectator:
+    gitlab: arctic-fox/spectator
