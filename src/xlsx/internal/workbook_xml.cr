@@ -10,7 +10,7 @@ module XLSX
     # `workbook.xml.rels` maps each `r:id` to a target file path
     # (e.g. `worksheets/sheet1.xml`).
     #
-    # Together they let us resolve: sheet name → sheet XML file path.
+    # Together they let us resolve: sheet name -> sheet XML file path.
     class WorkbookXML
       private WB_NS_MAP   = {"wb" => MAIN_NS, "r" => RELATION_NS}
       private RELS_NS_MAP = {"pr" => RELS_NS}
@@ -20,7 +20,7 @@ module XLSX
 
       getter sheet_refs : Array(SheetRef)
 
-      # Maps r:id → relative file path within xl/ (e.g. "worksheets/sheet1.xml").
+      # Maps r:id -> relative file path within xl/ (e.g. "worksheets/sheet1.xml").
       getter rid_to_target : Hash(String, String)
 
       def initialize
