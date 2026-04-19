@@ -1,6 +1,7 @@
 require "spectator"
 
 require "../src/xlsx"
+require "../src/xlsx/builder/*"
 require "../src/xlsx/internal/*"
 
 Spectator.configure do |config|

@@ -1,10 +1,4 @@
-require "./xlsx/cell_value"
-require "./xlsx/row"
-require "./xlsx/sheet"
-require "./xlsx/document"
-require "./xlsx/builder"
-require "./xlsx/row_builder"
-require "./xlsx/sheet_builder"
+require "./xlsx/*"
 
 module XLSX
   # CSV-compatible build. Yields a `Builder`; calls `close` after the block.

@@ -1,5 +1,5 @@
 module XLSX
-  # CSV-compatible builder. Appends rows sequentially to a single sheet.
+  # CSV-compatible XLSX builder. Appends rows sequentially to a single sheet.
   #
   # Usage:
   # ```
