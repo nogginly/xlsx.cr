@@ -24,8 +24,12 @@ module XLSX
     class Zip
       # Reads an XLSX file from *io* and returns a `Document`.
       def self.read(io : IO) : Document
-        entries = collect_entries(io)
+        read_from_entries(collect_entries(io))
+      end
 
+      # Parses a pre-collected entry map into a `Document`.
+      # Allows the caller to reuse entries for both reading and writing.
+      def self.read_from_entries(entries : Hash(String, String)) : Document
         wb = WorkbookXML.new
         ss = SharedStrings.new
         sx = SheetXML.new
@@ -46,8 +50,32 @@ module XLSX
         Document.new(sheets)
       end
 
+      # Collects all ZIP entries from *io* into a filename → content map.
+      def self.collect_entries(io : IO) : Hash(String, String)
+        entries = {} of String => String
+        ::Compress::Zip::Reader.open(io) do |zip|
+          zip.each_entry do |entry|
+            entries[entry.filename] = entry.io.gets_to_end
+          end
+        end
+        entries
+      end
+
       # Writes *document* as an XLSX file to *io*.
       def self.write(io : IO, document : Document) : Nil
+        write_impl(io, document, template_entries: nil)
+      end
+
+      # Writes *document* to *io*, using *template_entries* as a baseline.
+      # All entries from the template are carried over verbatim; only the
+      # entries we manage are replaced.
+      def self.write_with_template(io : IO, document : Document,
+                                   template_entries : Hash(String, String)) : Nil
+        write_impl(io, document, template_entries: template_entries)
+      end
+
+      private def self.write_impl(io : IO, document : Document,
+                                  template_entries : Hash(String, String)?) : Nil
         ss = SharedStrings.new
         sx = SheetXML.new
 
@@ -59,19 +87,38 @@ module XLSX
         end
 
         sheet_names = sheet_xmls.map(&.[0])
-
         wb = WorkbookXML.new
 
-        Compress::Zip::Writer.open(io) do |zip|
-          add(zip, "[Content_Types].xml", build_content_types(sheet_names))
-          add(zip, "_rels/.rels", build_root_rels)
-          add(zip, "xl/workbook.xml", wb.build_workbook(sheet_names))
-          add(zip, "xl/_rels/workbook.xml.rels", wb.build_rels(sheet_names))
-          add(zip, "xl/sharedStrings.xml", ss.to_xml)
-          add(zip, "xl/styles.xml", minimal_styles)
+        # Entries we always generate — these overwrite any template values.
+        managed = {
+          "[Content_Types].xml"        => build_content_types(sheet_names, template_entries),
+          "_rels/.rels"                => template_entries.try(&.["_rels/.rels"]?) || build_root_rels,
+          "xl/workbook.xml"            => wb.build_workbook(sheet_names, template_entries.try(&.["xl/workbook.xml"]?)),
+          "xl/_rels/workbook.xml.rels" => wb.build_rels(sheet_names, template_entries.try(&.["xl/_rels/workbook.xml.rels"]?)),
+          "xl/sharedStrings.xml"       => ss.to_xml,
+          "xl/styles.xml"              => template_entries.try(&.["xl/styles.xml"]?) || minimal_styles,
+        }
 
-          sheet_xmls.each_with_index do |(_, xml), i|
-            add(zip, "xl/worksheets/sheet#{i + 1}.xml", xml)
+        sheet_xmls.each_with_index do |(_, xml), i|
+          managed["xl/worksheets/sheet#{i + 1}.xml"] = xml
+        end
+
+        ::Compress::Zip::Writer.open(io) do |zip|
+          # Write all template entries not managed by us.
+          # calcChain.xml is intentionally excluded — Excel regenerates it
+          # on open, and our modified sheet data would make it stale/invalid.
+          if template_entries
+            template_entries.each do |filename, content|
+              next if managed.has_key?(filename)
+              next if filename.starts_with?("xl/worksheets/")
+              next if filename == "xl/calcChain.xml"
+              add(zip, filename, content)
+            end
+          end
+
+          # Write our managed entries.
+          managed.each do |filename, content|
+            add(zip, filename, content)
           end
         end
       end
@@ -99,22 +146,33 @@ module XLSX
         write(io, document)
       end
 
-      # ------------------------------------------------------------------
-      private def self.collect_entries(io : IO) : Hash(String, String)
-        entries = {} of String => String
-        Compress::Zip::Reader.open(io) do |zip|
-          zip.each_entry do |entry|
-            entries[entry.filename] = entry.io.gets_to_end
-          end
-        end
-        entries
-      end
-
-      private def self.add(zip : Compress::Zip::Writer, filename : String, content : String) : Nil
+      private def self.add(zip : ::Compress::Zip::Writer, filename : String, content : String) : Nil
         zip.add(filename) { |entry_io| entry_io.print content }
       end
 
-      private def self.build_content_types(sheet_names : Array(String)) : String
+      private def self.build_content_types(sheet_names : Array(String),
+                                           template_entries : Hash(String, String)?) : String
+        # Collect Override PartNames from template that we don't manage,
+        # so they are preserved in the output.
+        extra_overrides = {} of String => String # PartName => ContentType
+
+        if te = template_entries
+          if raw = te["[Content_Types].xml"]?
+            doc = XML.parse(raw)
+            ns_map = {"ct" => CONTENT_TYPES_NS}
+            doc.xpath_nodes("//ct:Types/ct:Override", ns_map).each do |node|
+              part = node["PartName"]
+              ctype = node["ContentType"]
+              next if part == "/xl/workbook.xml"
+              next if part == "/xl/sharedStrings.xml"
+              next if part == "/xl/styles.xml"
+              next if part.starts_with?("/xl/worksheets/")
+              next if part == "/xl/calcChain.xml"
+              extra_overrides[part] = ctype
+            end
+          end
+        end
+
         XML.build(indent: "  ") do |xml|
           xml.element("Types", xmlns: CONTENT_TYPES_NS) do
             xml.element("Default",
@@ -136,6 +194,9 @@ module XLSX
               xml.element("Override",
                 PartName: "/xl/worksheets/sheet#{i + 1}.xml",
                 ContentType: WORKSHEET_CONTENT_TYPE)
+            end
+            extra_overrides.each do |part, ctype|
+              xml.element("Override", PartName: part, ContentType: ctype)
             end
           end
         end

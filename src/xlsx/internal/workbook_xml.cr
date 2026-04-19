@@ -1,21 +1,21 @@
 require "./internal"
 
+require "html"
+
 module XLSX
   module Internal
     # Parses and builds `xl/workbook.xml` and `xl/_rels/workbook.xml.rels`.
     #
-    # `workbook.xml` lists sheets by name and relationship ID (`r:id`).
-    # `workbook.xml.rels` maps each `r:id` to a target file path
-    # (e.g. `worksheets/sheet1.xml`).
-    #
-    # Together they let us resolve: sheet name -> sheet XML file path.
+    # When a template is provided, both files are patched rather than
+    # regenerated — preserving all non-sheet content (namespaces, calcPr,
+    # bookViews, extLst, non-worksheet relationships, etc.)
     class WorkbookXML
       # Ordered list of {name, r:id} pairs as declared in workbook.xml.
       record SheetRef, name : String, rid : String
 
       getter sheet_refs : Array(SheetRef)
 
-      # Maps r:id -> relative file path within xl/ (e.g. "worksheets/sheet1.xml").
+      # Maps r:id → relative file path within xl/ (e.g. "worksheets/sheet1.xml").
       getter rid_to_target : Hash(String, String)
 
       def initialize
@@ -55,40 +55,85 @@ module XLSX
         @sheet_refs.map(&.name)
       end
 
-      # Serialises `xl/workbook.xml` for a given list of sheet names.
-      def build_workbook(sheet_names : Array(String)) : String
-        XML.build(indent: "  ") do |xml|
-          xml.element("workbook",
-            xmlns: MAIN_NS,
-            "xmlns:r": RELATION_NS
-          ) do
-            xml.element("sheets") do
-              sheet_names.each_with_index do |name, i|
-                rid = "rId#{i + 1}"
-                xml.element("sheet",
-                  name: name,
-                  sheetId: (i + 1).to_s,
-                  "r:id": rid
-                )
+      # Builds `xl/workbook.xml`.
+      # When *template_xml* is given, only the `<sheets>` element is replaced;
+      # all other content (namespaces, calcPr, bookViews, extLst, etc.) is
+      # preserved verbatim via string substitution.
+      def build_workbook(sheet_names : Array(String),
+                         template_xml : String? = nil) : String
+        if raw = template_xml
+          patch_sheets_element(raw, build_sheets_fragment(sheet_names))
+        else
+          XML.build(indent: "  ") do |xml|
+            xml.element("workbook", xmlns: MAIN_NS, "xmlns:r": RELATION_NS) do
+              xml.element("sheets") do
+                sheet_names.each_with_index do |name, i|
+                  n = i + 1
+                  xml.element("sheet", name: name, sheetId: n.to_s, "r:id": "rId#{n}")
+                end
               end
             end
           end
         end
       end
 
-      # Serialises `xl/_rels/workbook.xml.rels` for a given list of sheet names.
-      def build_rels(sheet_names : Array(String)) : String
+      # Builds `xl/_rels/workbook.xml.rels`.
+      # When *template_xml* is given, non-worksheet relationships are preserved;
+      # only the worksheet `Relationship` entries are replaced.
+      def build_rels(sheet_names : Array(String),
+                     template_xml : String? = nil) : String
+        # Collect non-worksheet relationships from the template.
+        preserved = [] of {String, String, String} # {Id, Type, Target}
+        if raw = template_xml
+          doc = XML.parse(raw)
+          doc.xpath_nodes("//pr:Relationships/pr:Relationship", RELS_NS_MAP).each do |node|
+            next if node["Type"]? == SHEET_TYPE
+            preserved << {node["Id"], node["Type"], node["Target"]}
+          end
+        end
+
+        # Assign new rIds for worksheets, avoiding collisions with preserved ones.
+        used_ids = preserved.map(&.[0]).to_set
+        sheet_rels = sheet_names.each_with_index.map do |_, i|
+          rid = next_rid(used_ids, i + 1)
+          used_ids << rid
+          {rid, SHEET_TYPE, "worksheets/sheet#{i + 1}.xml"}
+        end.to_a
+
         XML.build(indent: "  ") do |xml|
           xml.element("Relationships", xmlns: RELS_NS) do
-            sheet_names.each_with_index do |_, i|
-              n = i + 1
-              xml.element("Relationship",
-                Id: "rId#{n}",
-                Type: SHEET_TYPE,
-                Target: "worksheets/sheet#{n}.xml"
-              )
+            (preserved + sheet_rels).each do |(id, type, target)|
+              xml.element("Relationship", Id: id, Type: type, Target: target)
             end
           end
+        end
+      end
+
+      private def build_sheets_fragment(sheet_names : Array(String)) : String
+        String.build do |s|
+          s << "<sheets>"
+          sheet_names.each_with_index do |name, i|
+            n = i + 1
+            s << %(<sheet name="#{HTML.escape(name)}" sheetId="#{n}" r:id="rId#{n}"/>)
+          end
+          s << "</sheets>"
+        end
+      end
+
+      # Replaces the <sheets>...</sheets> content in *xml* with *sheets_xml*.
+      # Uses a simple regex since the sheets block is self-contained.
+      private def patch_sheets_element(xml : String, sheets_xml : String) : String
+        xml.gsub(/<sheets>.*?<\/sheets>/m, sheets_xml)
+      end
+
+      # Returns an rId string that doesn't collide with *used*.
+      # Starts probing from *hint*.
+      private def next_rid(used : Set(String), hint : Int32) : String
+        n = hint
+        loop do
+          candidate = "rId#{n}"
+          return candidate unless used.includes?(candidate)
+          n += 1
         end
       end
     end
