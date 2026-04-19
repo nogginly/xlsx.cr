@@ -1,6 +1,6 @@
 require "../src/xlsx"
 
-USAGE = "Usage: test01 <xlsx_file>"
+USAGE = "Usage: test01 <xlsx_file>\nRead an XLSX file and print contents to console."
 xlsx_file = ARGV[0]? || abort(USAGE)
 
 xlsx = XLSX::Document.open(xlsx_file)
