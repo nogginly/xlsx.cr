@@ -1,5 +1,7 @@
 require "./internal"
 
+require "xml"
+
 module XLSX
   module Internal
     # Parses and builds `xl/workbook.xml` and `xl/_rels/workbook.xml.rels`.
@@ -10,6 +12,9 @@ module XLSX
     #
     # Together they let us resolve: sheet name → sheet XML file path.
     class WorkbookXML
+      private WB_NS_MAP   = {"wb" => MAIN_NS, "r" => RELATION_NS}
+      private RELS_NS_MAP = {"pr" => RELS_NS}
+
       # Ordered list of {name, r:id} pairs as declared in workbook.xml.
       record SheetRef, name : String, rid : String
 
@@ -26,9 +31,7 @@ module XLSX
       # Parses `xl/workbook.xml`.
       def parse_workbook(xml : String) : Nil
         doc = XML.parse(xml)
-        doc.xpath_nodes("//ms:sheets/ms:sheet",
-          namespaces: {"ms" => MAIN_NS, "r" => RELATION_NS}
-        ).each do |node|
+        doc.xpath_nodes("//wb:workbook/wb:sheets/wb:sheet", WB_NS_MAP).each do |node|
           name = node["name"]
           rid = node["r:id"]? || node["id"]
           @sheet_refs << SheetRef.new(name: name, rid: rid)
@@ -38,9 +41,7 @@ module XLSX
       # Parses `xl/_rels/workbook.xml.rels`.
       def parse_rels(xml : String) : Nil
         doc = XML.parse(xml)
-        doc.xpath_nodes("//pr:Relationship",
-          namespaces: {"pr" => RELS_NS}
-        ).each do |node|
+        doc.xpath_nodes("//pr:Relationships/pr:Relationship", RELS_NS_MAP).each do |node|
           next unless node["Type"]? == SHEET_TYPE
           @rid_to_target[node["Id"]] = node["Target"]
         end
