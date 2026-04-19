@@ -1,6 +1,6 @@
 # xlsx
 
-A Crystal shard for reading and writing XLSX files cmopatible with Excel.
+A Crystal shard for reading and writing XLSX files compatible with Excel.
 
 ## Installation
 
