@@ -1,7 +1,5 @@
 require "./internal"
 
-require "xml"
-
 module XLSX
   module Internal
     # Parses and builds `xl/workbook.xml` and `xl/_rels/workbook.xml.rels`.
@@ -12,9 +10,6 @@ module XLSX
     #
     # Together they let us resolve: sheet name -> sheet XML file path.
     class WorkbookXML
-      private WB_NS_MAP   = {"wb" => MAIN_NS, "r" => RELATION_NS}
-      private RELS_NS_MAP = {"pr" => RELS_NS}
-
       # Ordered list of {name, r:id} pairs as declared in workbook.xml.
       record SheetRef, name : String, rid : String
 

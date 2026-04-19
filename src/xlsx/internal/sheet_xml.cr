@@ -1,4 +1,4 @@
-require "xml"
+require "./internal"
 
 module XLSX
   module Internal
@@ -6,10 +6,6 @@ module XLSX
     #
     # Depends on `SharedStrings` for resolving and interning string cell values.
     class SheetXML
-      SHEET_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
-
-      private NS_MAP = {"ns" => SHEET_NS}
-
       # Parses a worksheet XML string into a `Sheet`.
       #
       # *name*           — the sheet name (from workbook.xml)
@@ -19,15 +15,15 @@ module XLSX
         rows = Hash(Int32, Row).new
         doc = XML.parse(xml)
 
-        doc.xpath_nodes("//ns:worksheet/ns:sheetData/ns:row", NS_MAP).each do |row_node|
+        doc.xpath_nodes("//ns:worksheet/ns:sheetData/ns:row", MAIN_NS_MAP).each do |row_node|
           row_id = row_node["r"].to_i
           cells = Hash(Int32, CellValue).new
 
-          row_node.xpath_nodes("ns:c", NS_MAP).each do |cell_node|
+          row_node.xpath_nodes("ns:c", MAIN_NS_MAP).each do |cell_node|
             ref = cell_node["r"] # e.g. "B3"
             col_id = col_from_ref(ref)
             type = cell_node["t"]?
-            v_node = cell_node.xpath_node("ns:v", NS_MAP)
+            v_node = cell_node.xpath_node("ns:v", MAIN_NS_MAP)
 
             value : CellValue = if v_node.nil?
               Empty::INSTANCE
@@ -36,7 +32,7 @@ module XLSX
             elsif type == "b"
               v_node.content == "1"
             elsif type == "inlineStr"
-              t = cell_node.xpath_node("ns:is/ns:t", NS_MAP)
+              t = cell_node.xpath_node("ns:is/ns:t", MAIN_NS_MAP)
               t ? t.content : Empty::INSTANCE
             else
               # no type attr -> number; type "str" or "e" -> treat as string
@@ -61,7 +57,7 @@ module XLSX
       # Strings are interned into *shared_strings* during serialisation.
       def build(sheet : Sheet, shared_strings : SharedStrings) : String
         XML.build(indent: "  ") do |xml|
-          xml.element("worksheet", xmlns: SHEET_NS) do
+          xml.element("worksheet", xmlns: MAIN_NS) do
             xml.element("sheetData") do
               sheet.each_row do |row, row_id|
                 xml.element("row", r: row_id) do

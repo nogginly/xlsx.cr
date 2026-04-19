@@ -39,9 +39,7 @@ module XLSX
       # Parses a `sharedStrings.xml` document into this table.
       def parse(xml : String) : Nil
         doc = XML.parse(xml)
-
-        doc.xpath_nodes("//ms:si/ms:t",
-          namespaces: {"ms" => MAIN_NS}).each do |elem_t|
+        doc.xpath_nodes("//ns:sst/ns:si/ns:t", MAIN_NS_MAP).each do |elem_t|
           # <t> holds the value; preserve whitespace via xml:space if present
           @strings << (elem_t ? elem_t.content : "")
         end
