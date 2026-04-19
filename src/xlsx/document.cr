@@ -9,10 +9,8 @@ module XLSX
     end
 
     # Opens an XLSX document from an `IO` source.
-    #
-    # NOTE: Not yet implemented — requires the internal ZIP/XML parser.
     def self.open(io : IO) : self
-      raise NotImplementedError.new("XLSX::Document.open — ZIP/XML parser not yet implemented")
+      Internal::Zip.read(io)
     end
 
     def initialize(@sheets : Array(Sheet))

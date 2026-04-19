@@ -1,4 +1,9 @@
+require "compress/zip"
+require "xml"
+
 require "./xlsx/*"
+require "./xlsx/builder/*"
+require "./xlsx/internal/*"
 
 module XLSX
   # CSV-compatible build. Yields a `Builder`; calls `close` after the block.
@@ -27,10 +32,11 @@ module XLSX
   # NOTE: Writing is not yet implemented — raises `NotImplementedError`
   # after all sheet blocks have been evaluated.
   def self.build(io : IO, sheets : Array(String), & : SheetBuilder ->)
-    sheets.each do |name|
+    built_sheets = sheets.map do |name|
       sb = SheetBuilder.new(name)
       yield sb
+      sb.build
     end
-    raise NotImplementedError.new("XLSX.build: ZIP/XML writer not yet implemented")
+    Internal::Zip.write(io, Document.new(built_sheets))
   end
 end

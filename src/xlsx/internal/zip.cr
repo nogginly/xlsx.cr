@@ -62,7 +62,7 @@ module XLSX
 
         wb = WorkbookXML.new
 
-        ::Compress::Zip::Writer.open(io) do |zip|
+        Compress::Zip::Writer.open(io) do |zip|
           add(zip, "[Content_Types].xml", build_content_types(sheet_names))
           add(zip, "_rels/.rels", build_root_rels)
           add(zip, "xl/workbook.xml", wb.build_workbook(sheet_names))
@@ -102,7 +102,7 @@ module XLSX
       # ------------------------------------------------------------------
       private def self.collect_entries(io : IO) : Hash(String, String)
         entries = {} of String => String
-        ::Compress::Zip::Reader.open(io) do |zip|
+        Compress::Zip::Reader.open(io) do |zip|
           zip.each_entry do |entry|
             entries[entry.filename] = entry.io.gets_to_end
           end
@@ -110,7 +110,7 @@ module XLSX
         entries
       end
 
-      private def self.add(zip : ::Compress::Zip::Writer, filename : String, content : String) : Nil
+      private def self.add(zip : Compress::Zip::Writer, filename : String, content : String) : Nil
         zip.add(filename) { |entry_io| entry_io.print content }
       end
 

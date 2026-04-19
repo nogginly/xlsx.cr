@@ -34,10 +34,8 @@ module XLSX
     end
 
     # Finalizes and writes the XLSX file to the `IO`.
-    #
-    # NOTE: Not yet implemented — requires the internal ZIP/XML writer.
     def close
-      raise NotImplementedError.new("XLSX::Builder#close — ZIP/XML writer not yet implemented")
+      Internal::Zip.write_rows(@io, @rows)
     end
   end
 end

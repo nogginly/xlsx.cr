@@ -42,8 +42,14 @@ Spectator.describe XLSX::Builder do
   end
 
   describe "#close" do
-    it "raises NotImplementedError until the ZIP writer is implemented" do
-      expect { subject.close }.to raise_error(NotImplementedError)
+    it "writes a readable XLSX document" do
+      subject.row("name", "score")
+      subject.row("alice", 95.0)
+      subject.close
+      io.rewind
+      doc = XLSX::Document.open(io)
+      expect(doc[0][1, 1]).to eq("name")
+      expect(doc[0][2, 2]).to eq(95.0)
     end
   end
 end

@@ -48,9 +48,16 @@ Spectator.describe XLSX::Document do
 
   describe ".open" do
     context "from IO" do
-      it "raises NotImplementedError until the parser is implemented" do
+      it "reads a document written by Internal::Zip.write" do
+        sheet = XLSX::Sheet.new("Test", {
+          1 => XLSX::Row.new(1, {1 => "hello".as(XLSX::CellValue)}),
+        })
         io = IO::Memory.new
-        expect { XLSX::Document.open(io) }.to raise_error(NotImplementedError)
+        XLSX::Internal::Zip.write(io, XLSX::Document.new([sheet]))
+        io.rewind
+        doc = XLSX::Document.open(io)
+        expect(doc[0].name).to eq("Test")
+        expect(doc[0][1, 1]).to eq("hello")
       end
     end
   end
