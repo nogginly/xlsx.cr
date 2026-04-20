@@ -145,8 +145,10 @@ module XLSX
         in String
           idx = ss.intern(value)
           %(<c r="#{ref}" t="s"#{extra}><v>#{idx}</v></c>)
+        in Int64
+          %(<c r="#{ref}"#{extra}><v>#{value}</v></c>)
         in Float64
-          %(<c r="#{ref}"#{extra}><v>#{value.floor == value ? value.to_i64 : value}</v></c>)
+          %(<c r="#{ref}"#{extra}><v>#{value}</v></c>)
         in Bool
           %(<c r="#{ref}" t="b"#{extra}><v>#{value ? "1" : "0"}</v></c>)
         in Formula
@@ -198,6 +200,7 @@ module XLSX
                                          ss : SharedStrings) : {String?, String?}
         case cached
         in String                                then {"str", ss.intern(cached).to_s}
+        in Int64                                 then {nil, cached.to_s}
         in Float64                               then {nil, cached.to_s}
         in Bool                                  then {"b", cached ? "1" : "0"}
         in Formula, SharedFormulaRef, Empty, Nil then {nil, nil}

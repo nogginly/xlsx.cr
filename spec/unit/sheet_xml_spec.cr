@@ -146,6 +146,33 @@ Spectator.describe XLSX::Internal::SheetXML do
   end
 
   # -------------------------------------------------------------------------
+  # Int64 write support
+  # -------------------------------------------------------------------------
+
+  describe "#build — Int64 cells" do
+    let(ss) { XLSX::Internal::SharedStrings.new }
+
+    it "writes Int64 as a plain numeric cell with no decimal point" do
+      sheet = XLSX::Sheet.new("S", {
+        1 => XLSX::Row.new(1, {1 => XLSX::Cell.new(42_i64.as(XLSX::CellValue))}),
+      })
+      xml = subject.build(sheet, ss)
+      expect(xml).to contain("<v>42</v>")
+      expect(xml).not_to contain("42.0")
+    end
+
+    it "round-trips Int64 as Float64 on read (Excel stores all numbers as float)" do
+      sheet = XLSX::Sheet.new("S", {
+        1 => XLSX::Row.new(1, {1 => XLSX::Cell.new(42_i64.as(XLSX::CellValue))}),
+      })
+      xml = subject.build(sheet, ss)
+      parsed = subject.parse("S", xml, ss)
+      expect(parsed[1, 1]).to eq(42.0)
+      expect(parsed[1, 1]).to be_a(Float64)
+    end
+  end
+
+  # -------------------------------------------------------------------------
   # Building
   # -------------------------------------------------------------------------
 

@@ -72,13 +72,15 @@ module XLSX
       new(value, {} of String => String)
     end
   end
+  # The full set of values a cell can hold.
   #
   # - `String`           — text cell
-  # - `Float64`          — numeric cell (Excel stores all numbers as floats)
+  # - `Int64`            — integer numeric cell (write convenience; Excel stores as float)
+  # - `Float64`          — floating point numeric cell
   # - `Bool`             — boolean cell
   # - `Formula`          — formula cell with cached result
   # - `SharedFormulaRef` — satellite cell in a shared formula group
   # - `Empty`            — cell element present in XML, but no value child
   # - `Nil`              — cell element absent from XML entirely
-  alias CellValue = String | Float64 | Bool | Formula | SharedFormulaRef | Empty | Nil
+  alias CellValue = String | Int64 | Float64 | Bool | Formula | SharedFormulaRef | Empty | Nil
 end
