@@ -38,15 +38,15 @@ module XLSX
 
             value : CellValue = if f_node
               parse_formula(f_node, v_node, type, shared_strings)
+            elsif type == "inlineStr"
+              t = cell_node.xpath_node("ns:is/ns:t", NS_MAP)
+              t ? InlineStr.new(t.content) : Empty::INSTANCE
             elsif v_node.nil?
               Empty::INSTANCE
             elsif type == "s"
               shared_strings[v_node.content.to_i]
             elsif type == "b"
               v_node.content == "1"
-            elsif type == "inlineStr"
-              t = cell_node.xpath_node("ns:is/ns:t", NS_MAP)
-              t ? t.content : Empty::INSTANCE
             else
               if type.nil?
                 v_node.content.to_f64
@@ -145,6 +145,8 @@ module XLSX
         in String
           idx = ss.intern(value)
           %(<c r="#{ref}" t="s"#{extra}><v>#{idx}</v></c>)
+        in InlineStr
+          %(<c r="#{ref}" t="inlineStr"#{extra}><is><t>#{HTML.escape(value.value)}</t></is></c>)
         in Int64
           %(<c r="#{ref}"#{extra}><v>#{value}</v></c>)
         in Float64
@@ -200,6 +202,7 @@ module XLSX
                                          ss : SharedStrings) : {String?, String?}
         case cached
         in String                                then {"str", ss.intern(cached).to_s}
+        in InlineStr                             then {"str", ss.intern(cached.value).to_s}
         in Int64                                 then {nil, cached.to_s}
         in Float64                               then {nil, cached.to_s}
         in Bool                                  then {"b", cached ? "1" : "0"}

@@ -146,6 +146,75 @@ Spectator.describe XLSX::Internal::SheetXML do
   end
 
   # -------------------------------------------------------------------------
+  # InlineStr support
+  # -------------------------------------------------------------------------
+
+  describe "#parse — inlineStr cells" do
+    let(inline_xml) do
+      <<-XML
+      <?xml version="1.0" encoding="UTF-8"?>
+      <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+        <sheetData>
+          <row r="1">
+            <c r="A1" t="inlineStr"><is><t>  hello  </t></is></c>
+          </row>
+        </sheetData>
+      </worksheet>
+      XML
+    end
+
+    it "parses as InlineStr" do
+      ss = XLSX::Internal::SharedStrings.new
+      sheet = subject.parse("S", inline_xml, ss)
+      expect(sheet[1, 1]).to be_a(XLSX::InlineStr)
+    end
+
+    it "preserves the string value including whitespace" do
+      ss = XLSX::Internal::SharedStrings.new
+      sheet = subject.parse("S", inline_xml, ss)
+      expect(sheet[1, 1].as(XLSX::InlineStr).value).to eq("  hello  ")
+    end
+
+    it "does not intern the string into shared strings" do
+      ss = XLSX::Internal::SharedStrings.new
+      sheet = subject.parse("S", inline_xml, ss)
+      expect(ss.size).to eq(0)
+    end
+  end
+
+  describe "#build — InlineStr cells" do
+    let(ss) { XLSX::Internal::SharedStrings.new }
+
+    it "writes InlineStr as an inlineStr cell" do
+      sheet = XLSX::Sheet.new("S", {
+        1 => XLSX::Row.new(1, {1 => XLSX::Cell.new(XLSX::InlineStr.new("  hello  ").as(XLSX::CellValue))}),
+      })
+      xml = subject.build(sheet, ss)
+      expect(xml).to contain(%[t="inlineStr"])
+      expect(xml).to contain("<is><t>  hello  </t></is>")
+    end
+
+    it "does not intern InlineStr into shared strings" do
+      sheet = XLSX::Sheet.new("S", {
+        1 => XLSX::Row.new(1, {1 => XLSX::Cell.new(XLSX::InlineStr.new("hello").as(XLSX::CellValue))}),
+      })
+      subject.build(sheet, ss)
+      expect(ss.size).to eq(0)
+    end
+
+    it "round-trips InlineStr through parse" do
+      sheet = XLSX::Sheet.new("S", {
+        1 => XLSX::Row.new(1, {1 => XLSX::Cell.new(XLSX::InlineStr.new("  spaced  ").as(XLSX::CellValue))}),
+      })
+      xml = subject.build(sheet, ss)
+      parsed = subject.parse("S", xml, ss)
+      result = parsed[1, 1]
+      expect(result).to be_a(XLSX::InlineStr)
+      expect(result.as(XLSX::InlineStr).value).to eq("  spaced  ")
+    end
+  end
+
+  # -------------------------------------------------------------------------
   # Int64 write support
   # -------------------------------------------------------------------------
 

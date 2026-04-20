@@ -72,9 +72,25 @@ module XLSX
       new(value, {} of String => String)
     end
   end
+  # A string stored inline in the cell element rather than via the shared
+  # string table. Preserves leading/trailing whitespace exactly.
+  # Distinguishable from `String` (shared string) at the type level.
+  record InlineStr, value : String do
+    delegate to_s, size, includes?, starts_with?, ends_with?, strip, to: @value
+
+    def [](index : Int32) : Char
+      @value[index]
+    end
+
+    def ==(other : String) : Bool
+      @value == other
+    end
+  end
+
   # The full set of values a cell can hold.
   #
-  # - `String`           — text cell
+  # - `String`           — shared string cell (interned in sharedStrings.xml)
+  # - `InlineStr`        — inline string cell (stored directly in the cell element)
   # - `Int64`            — integer numeric cell (write convenience; Excel stores as float)
   # - `Float64`          — floating point numeric cell
   # - `Bool`             — boolean cell
@@ -82,5 +98,5 @@ module XLSX
   # - `SharedFormulaRef` — satellite cell in a shared formula group
   # - `Empty`            — cell element present in XML, but no value child
   # - `Nil`              — cell element absent from XML entirely
-  alias CellValue = String | Int64 | Float64 | Bool | Formula | SharedFormulaRef | Empty | Nil
+  alias CellValue = String | InlineStr | Int64 | Float64 | Bool | Formula | SharedFormulaRef | Empty | Nil
 end

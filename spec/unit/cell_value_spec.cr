@@ -122,6 +122,11 @@ Spectator.describe "XLSX::CellValue" do
     expect(cell).to eq("hello")
   end
 
+  it "accepts InlineStr values" do
+    cell : XLSX::CellValue = XLSX::InlineStr.new("hello")
+    expect(cell).to be_a(XLSX::InlineStr)
+  end
+
   it "accepts Int64 values" do
     cell : XLSX::CellValue = 42_i64
     expect(cell).to eq(42_i64)

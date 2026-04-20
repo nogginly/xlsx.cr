@@ -10,7 +10,7 @@ File.open(template_xlsx_file, "r") do |t_io|
     XLSX.build(out_io, t_io) do |sheet|
       next unless sheet.name == dest_sheet_name
       puts "Sheet: #{sheet.name} found"
-      sheet.append_row(8, "Zeus", "All father")
+      sheet.append_row(8.to_i64, "Zeus", XLSX::InlineStr.new("All father"))
     end
   end
 end
