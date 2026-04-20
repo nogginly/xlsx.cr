@@ -5,9 +5,6 @@ require "./xlsx/*"
 require "./xlsx/builder/*"
 require "./xlsx/internal/*"
 
-require "compress/zip"
-require "xml"
-
 module XLSX
   # CSV-compatible build. Yields a `Builder`; calls `close` after the block.
   #

@@ -186,3 +186,121 @@ Spectator.describe XLSX::Internal::SheetXML do
     end
   end
 end
+
+Spectator.describe "XLSX::Internal::SheetXML formula handling" do
+  subject { XLSX::Internal::SheetXML.new }
+
+  let(ss) { XLSX::Internal::SharedStrings.new }
+
+  describe "#parse — plain formula" do
+    let(xml) do
+      <<-XML
+      <?xml version="1.0" encoding="UTF-8"?>
+      <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+        <sheetData>
+          <row r="1">
+            <c r="A1"><f>SUM(B1:B5)</f><v>42.0</v></c>
+          </row>
+        </sheetData>
+      </worksheet>
+      XML
+    end
+
+    it "parses as Formula with correct expression" do
+      sheet = subject.parse("S", xml, ss)
+      cell = sheet[1, 1]
+      expect(cell).to be_a(XLSX::Formula)
+      formula = cell.as(XLSX::Formula)
+      expect(formula.expression).to eq("SUM(B1:B5)")
+    end
+
+    it "parses the cached numeric value" do
+      sheet = subject.parse("S", xml, ss)
+      formula = sheet[1, 1].as(XLSX::Formula)
+      expect(formula.cached_value).to eq(42.0)
+    end
+
+    it "has no shared_index" do
+      sheet = subject.parse("S", xml, ss)
+      formula = sheet[1, 1].as(XLSX::Formula)
+      expect(formula.shared_index).to be_nil
+    end
+  end
+
+  describe "#parse — shared formula master" do
+    let(xml) do
+      <<-XML
+      <?xml version="1.0" encoding="UTF-8"?>
+      <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+        <sheetData>
+          <row r="1">
+            <c r="B1"><f t="shared" ref="B1:B3" si="0">A1*2</f><v>10.0</v></c>
+          </row>
+          <row r="2">
+            <c r="B2"><f t="shared" si="0"/><v>20.0</v></c>
+          </row>
+          <row r="3">
+            <c r="B3"><f t="shared" si="0"/><v>30.0</v></c>
+          </row>
+        </sheetData>
+      </worksheet>
+      XML
+    end
+
+    it "parses master as Formula with shared_index and shared_ref" do
+      sheet = subject.parse("S", xml, ss)
+      master = sheet[1, 2].as(XLSX::Formula)
+      expect(master.expression).to eq("A1*2")
+      expect(master.shared_index).to eq(0)
+      expect(master.shared_ref).to eq("B1:B3")
+    end
+
+    it "parses satellites as SharedFormulaRef" do
+      sheet = subject.parse("S", xml, ss)
+      expect(sheet[2, 2]).to be_a(XLSX::SharedFormulaRef)
+      expect(sheet[3, 2]).to be_a(XLSX::SharedFormulaRef)
+    end
+
+    it "preserves cached values on satellites" do
+      sheet = subject.parse("S", xml, ss)
+      sfr = sheet[2, 2].as(XLSX::SharedFormulaRef)
+      expect(sfr.cached_value).to eq(20.0)
+      expect(sfr.shared_index).to eq(0)
+    end
+  end
+
+  describe "#build — round-trips formulas" do
+    it "round-trips a plain formula" do
+      formula = XLSX::Formula.new("SUM(B1:B5)", 42.0.as(XLSX::CellValue))
+      rows = {1 => XLSX::Row.new(1, {1 => formula.as(XLSX::CellValue)})}
+      sheet = XLSX::Sheet.new("S", rows)
+      xml = subject.build(sheet, ss)
+      parsed = subject.parse("S", xml, ss)
+      result = parsed[1, 1].as(XLSX::Formula)
+      expect(result.expression).to eq("SUM(B1:B5)")
+      expect(result.cached_value).to eq(42.0)
+    end
+
+    it "round-trips a shared formula master and satellite" do
+      master = XLSX::Formula.new("A1*2", 10.0.as(XLSX::CellValue),
+        shared_index: 0, shared_ref: "B1:B2")
+      satellite = XLSX::SharedFormulaRef.new(0, 20.0.as(XLSX::CellValue))
+      rows = {
+        1 => XLSX::Row.new(1, {2 => master.as(XLSX::CellValue)}),
+        2 => XLSX::Row.new(2, {2 => satellite.as(XLSX::CellValue)}),
+      }
+      sheet = XLSX::Sheet.new("S", rows)
+      xml = subject.build(sheet, ss)
+      parsed = subject.parse("S", xml, ss)
+
+      m = parsed[1, 2].as(XLSX::Formula)
+      expect(m.expression).to eq("A1*2")
+      expect(m.shared_index).to eq(0)
+      expect(m.shared_ref).to eq("B1:B2")
+
+      sfr = parsed[2, 2].as(XLSX::SharedFormulaRef)
+      expect(sfr.shared_index).to eq(0)
+      expect(sfr.cached_value).to eq(20.0)
+    end
+  end
+end
