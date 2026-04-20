@@ -57,8 +57,8 @@ Spectator.describe XLSX::SheetBuilder do
   describe ".from_sheet" do
     let(existing_sheet) do
       rows = {
-        1 => XLSX::Row.new(1, {1 => "header".as(XLSX::CellValue)}),
-        2 => XLSX::Row.new(2, {1 => "data".as(XLSX::CellValue)}),
+        1 => XLSX::Row.new(1, {1 => XLSX::Cell.new("header".as(XLSX::CellValue))}),
+        2 => XLSX::Row.new(2, {1 => XLSX::Cell.new("data".as(XLSX::CellValue))}),
       }
       XLSX::Sheet.new("Data", rows)
     end

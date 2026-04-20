@@ -2,7 +2,7 @@ module XLSX
   # Represents a cell that exists in the XML but carries no value.
   # Distinct from Nil, which means the cell is absent from the XML entirely.
   struct Empty
-    INSTANCE = self.new
+    INSTANCE = new
 
     def to_s(io : IO) : Nil
       # intentionally empty — an empty cell has no string representation
@@ -62,7 +62,16 @@ module XLSX
     end
   end
 
-  # The full set of values a cell can hold.
+  # A cell value paired with its preserved XML attributes (e.g. style index `s`).
+  #
+  # `attrs` contains all `<c>` element attributes except `r` (the cell reference),
+  # which is always derived from position.
+  record Cell, value : CellValue, attrs : Hash(String, String) do
+    # Convenience — most callers only need the value.
+    def self.new(value : CellValue)
+      new(value, {} of String => String)
+    end
+  end
   #
   # - `String`           — text cell
   # - `Float64`          — numeric cell (Excel stores all numbers as floats)

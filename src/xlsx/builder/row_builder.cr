@@ -4,29 +4,27 @@ module XLSX
     getter row_id : Int32
 
     def initialize(@row_id : Int32)
-      @cells = {} of Int32 => CellValue
+      @cells = {} of Int32 => Cell
+      @attrs = {} of String => String
     end
 
     # Populates cells in *span* by calling the block with each column ID.
     # The block's return value becomes the cell value.
-    #
-    # ```
-    # row.cells(2..5) { |col_id| "R#{row_id}C#{col_id}" }
-    # ```
     def cells(span : Range(Int32, Int32), & : Int32 -> CellValue)
       span.each do |col_id|
-        @cells[col_id] = yield col_id
+        @cells[col_id] = Cell.new(yield col_id)
       end
     end
 
     # Sets a single cell directly. Overwrites any value already at *col_id*.
     def []=(col_id : Int32, value : CellValue)
-      @cells[col_id] = value
+      existing_attrs = @cells[col_id]?.try(&.attrs) || {} of String => String
+      @cells[col_id] = Cell.new(value, existing_attrs)
     end
 
     # Produces the immutable `Row`.
     def build : Row
-      Row.new(@row_id, @cells)
+      Row.new(@row_id, @cells, @attrs)
     end
   end
 end

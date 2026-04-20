@@ -5,6 +5,12 @@ module XLSX
     # Parses and builds individual worksheet XML files (`xl/worksheets/sheetN.xml`).
     #
     # Depends on `SharedStrings` for resolving and interning string cell values.
+    #
+    # When a *template_xml* is supplied to `build`, the worksheet XML is patched
+    # rather than regenerated — preserving `<sheetViews>` (freeze panes),
+    # `<sheetFormatPr>`, `<pageMargins>`, and all other non-data elements.
+    # Existing rows retain their original XML (including style attributes);
+    # only newly appended rows are generated fresh.
     class SheetXML
       NS_MAP = {"ns" => MAIN_NS}
 
@@ -19,7 +25,8 @@ module XLSX
 
         doc.xpath_nodes("//ns:worksheet/ns:sheetData/ns:row", NS_MAP).each do |row_node|
           row_id = row_node["r"].to_i
-          cells = Hash(Int32, CellValue).new
+          cells = Hash(Int32, Cell).new
+          attrs = node_attrs(row_node, except: "r")
 
           row_node.xpath_nodes("ns:c", NS_MAP).each do |cell_node|
             ref = cell_node["r"]
@@ -27,6 +34,7 @@ module XLSX
             type = cell_node["t"]?
             v_node = cell_node.xpath_node("ns:v", NS_MAP)
             f_node = cell_node.xpath_node("ns:f", NS_MAP)
+            cell_attrs = node_attrs(cell_node, except: "r")
 
             value : CellValue = if f_node
               parse_formula(f_node, v_node, type, shared_strings)
@@ -47,10 +55,10 @@ module XLSX
               end
             end
 
-            cells[col_id] = value
+            cells[col_id] = Cell.new(value, cell_attrs)
           end
 
-          rows[row_id] = Row.new(row_id, cells)
+          rows[row_id] = Row.new(row_id, cells, attrs)
         end
 
         Sheet.new(name, rows)
@@ -58,20 +66,25 @@ module XLSX
 
       # Serialises a `Sheet` to worksheet XML.
       #
-      # Strings are interned into *shared_strings* during serialisation.
-      def build(sheet : Sheet, shared_strings : SharedStrings) : String
-        XML.build(indent: "  ") do |xml|
-          xml.element("worksheet", xmlns: MAIN_NS) do
-            xml.element("sheetData") do
-              sheet.each_row do |row, row_id|
-                xml.element("row", r: row_id) do
-                  row.each_cell do |value, col_id|
-                    ref = cell_ref(row_id, col_id)
-                    emit_cell(xml, ref, value, shared_strings)
-                  end
-                end
-              end
-            end
+      # When *template_xml* is given, only `<sheetData>` is replaced; all other
+      # worksheet elements are preserved verbatim. Existing rows use their
+      # original stored attributes; new rows (not present in the template) are
+      # generated fresh.
+      #
+      # When *template_row_ids* is supplied, row IDs in that set are treated as
+      # existing and their stored attrs are emitted; others are treated as new.
+      def build(sheet : Sheet, shared_strings : SharedStrings,
+                template_xml : String? = nil) : String
+        sheet_data = build_sheet_data(sheet, shared_strings)
+
+        if raw = template_xml
+          raw.gsub(/<sheetData>.*?<\/sheetData>|<sheetData\/>/m, sheet_data)
+        else
+          String.build do |s|
+            s << %[<?xml version="1.0" encoding="UTF-8"?>]
+            s << %[<worksheet xmlns="#{MAIN_NS}">]
+            s << sheet_data
+            s << "</worksheet>"
           end
         end
       end
@@ -80,16 +93,12 @@ module XLSX
       # Cell reference helpers (public for testability)
       # -----------------------------------------------------------------------
 
-      # Converts a column letter string to a 1-based integer.
-      # "A" → 1, "Z" → 26, "AA" → 27
       def col_index(letters : String) : Int32
         letters.upcase.chars.reduce(0) do |acc, ch|
           acc * 26 + (ch.ord - 'A'.ord + 1)
         end
       end
 
-      # Converts a 1-based column integer to a letter string.
-      # 1 → "A", 26 → "Z", 27 → "AA"
       def col_letters(col : Int32) : String
         result = ""
         n = col
@@ -100,17 +109,110 @@ module XLSX
         result
       end
 
-      # Parses a cell reference (e.g. "B3") into a 1-based column index.
       def col_from_ref(ref : String) : Int32
         col_index(ref.chars.take_while(&.letter?).join)
       end
 
-      # Produces a cell reference string from 1-based row and col integers.
       def cell_ref(row : Int32, col : Int32) : String
         "#{col_letters(col)}#{row}"
       end
 
       # -----------------------------------------------------------------------
+
+      # Builds the `<sheetData>...</sheetData>` string for *sheet*.
+      # Row and cell attrs stored on the model are re-emitted verbatim.
+      private def build_sheet_data(sheet : Sheet, ss : SharedStrings) : String
+        String.build do |s|
+          s << "<sheetData>"
+          sheet.each_row do |row, row_id|
+            s << "<row r=\"#{row_id}\""
+            row.attrs.each { |k, v| s << " #{k}=\"#{HTML.escape(v)}\"" }
+            s << ">"
+            row.each_cell_full do |cell, col_id|
+              ref = cell_ref(row_id, col_id)
+              s << emit_cell_string(ref, cell, ss)
+            end
+            s << "</row>"
+          end
+          s << "</sheetData>"
+        end
+      end
+
+      private def emit_cell_string(ref : String, cell : Cell, ss : SharedStrings) : String
+        extra = cell.attrs.reject("t").map { |k, v| " #{k}=\"#{HTML.escape(v)}\"" }.join
+        value = cell.value
+        case value
+        in String
+          idx = ss.intern(value)
+          %(<c r="#{ref}" t="s"#{extra}><v>#{idx}</v></c>)
+        in Float64
+          %(<c r="#{ref}"#{extra}><v>#{value.floor == value ? value.to_i64 : value}</v></c>)
+        in Bool
+          %(<c r="#{ref}" t="b"#{extra}><v>#{value ? "1" : "0"}</v></c>)
+        in Formula
+          emit_formula_string(ref, value, cell.attrs.reject("t"), ss)
+        in SharedFormulaRef
+          emit_shared_ref_string(ref, value, cell.attrs.reject("t"), ss)
+        in Empty
+          %(<c r="#{ref}"#{extra}/>)
+        in Nil
+          ""
+        end
+      end
+
+      private def emit_formula_string(ref : String, formula : Formula,
+                                      extra_attrs : Hash(String, String),
+                                      ss : SharedStrings) : String
+        extra = extra_attrs.map { |k, v| " #{k}=\"#{HTML.escape(v)}\"" }.join
+        cached = formula.cached_value
+        t_attr, v_content = formula_type_and_value(cached, ss)
+        t_str = t_attr ? " t=\"#{t_attr}\"" : ""
+        f_str = emit_f_string(formula)
+        v_str = v_content ? "<v>#{v_content}</v>" : ""
+        %(<c r="#{ref}"#{t_str}#{extra}>#{f_str}#{v_str}</c>)
+      end
+
+      private def emit_shared_ref_string(ref : String, sfr : SharedFormulaRef,
+                                         extra_attrs : Hash(String, String),
+                                         ss : SharedStrings) : String
+        extra = extra_attrs.map { |k, v| " #{k}=\"#{HTML.escape(v)}\"" }.join
+        t_attr, v_content = formula_type_and_value(sfr.cached_value, ss)
+        t_str = t_attr ? " t=\"#{t_attr}\"" : ""
+        f_str = %(<f t="shared" si="#{sfr.shared_index}"/>)
+        v_str = v_content ? "<v>#{v_content}</v>" : ""
+        %(<c r="#{ref}"#{t_str}#{extra}>#{f_str}#{v_str}</c>)
+      end
+
+      private def emit_f_string(formula : Formula) : String
+        expr = HTML.escape(formula.expression)
+        if si = formula.shared_index
+          ref_attr = formula.shared_ref ? " ref=\"#{formula.shared_ref}\"" : ""
+          %(<f t="shared" si="#{si}"#{ref_attr}>#{expr}</f>)
+        else
+          %(<f>#{expr}</f>)
+        end
+      end
+
+      # Returns {t_attribute, v_content} for a formula's cached value.
+      private def formula_type_and_value(cached : CellValue,
+                                         ss : SharedStrings) : {String?, String?}
+        case cached
+        in String                                then {"str", ss.intern(cached).to_s}
+        in Float64                               then {nil, cached.to_s}
+        in Bool                                  then {"b", cached ? "1" : "0"}
+        in Formula, SharedFormulaRef, Empty, Nil then {nil, nil}
+        end
+      end
+
+      # Collects all attributes from *node* except *except* into a Hash.
+      private def node_attrs(node : XML::Node, except : String) : Hash(String, String)
+        attrs = {} of String => String
+        node.attributes.each do |attr|
+          next if attr.name == except
+          attrs[attr.name] = attr.content
+        end
+        attrs
+      end
 
       private def parse_formula(f_node : XML::Node, v_node : XML::Node?,
                                 type : String?,
@@ -141,94 +243,6 @@ module XLSX
         when "b"        then v_node.content == "1"
         when "str", "e" then v_node.content
         else                 v_node.content.to_f64
-        end
-      end
-
-      private def emit_cell(xml : XML::Builder, ref : String,
-                            value : CellValue, ss : SharedStrings)
-        case value
-        in String
-          idx = ss.intern(value)
-          xml.element("c", r: ref, t: "s") { xml.element("v") { xml.text idx.to_s } }
-        in Float64
-          xml.element("c", r: ref) { xml.element("v") { xml.text value.to_s } }
-        in Bool
-          xml.element("c", r: ref, t: "b") { xml.element("v") { xml.text value ? "1" : "0" } }
-        in Formula
-          emit_formula(xml, ref, value, ss)
-        in SharedFormulaRef
-          emit_shared_ref(xml, ref, value, ss)
-        in Empty
-          xml.element("c", r: ref)
-        in Nil
-          # absent cells are not written
-        end
-      end
-
-      # Emits a formula cell. The <c> type attribute depends on the cached
-      # value type — string results need t="str", booleans t="b", numerics
-      # and errors need no t attribute.
-      private def emit_formula(xml : XML::Builder, ref : String,
-                               formula : Formula, ss : SharedStrings)
-        cached = formula.cached_value
-        case cached
-        in String
-          xml.element("c", r: ref, t: "str") do
-            emit_f_element(xml, formula)
-            xml.element("v") { xml.text ss.intern(cached).to_s }
-          end
-        in Bool
-          xml.element("c", r: ref, t: "b") do
-            emit_f_element(xml, formula)
-            xml.element("v") { xml.text cached ? "1" : "0" }
-          end
-        in Float64
-          xml.element("c", r: ref) do
-            emit_f_element(xml, formula)
-            xml.element("v") { xml.text cached.to_s }
-          end
-        in Formula, SharedFormulaRef, Empty, Nil
-          xml.element("c", r: ref) { emit_f_element(xml, formula) }
-        end
-      end
-
-      # Emits a shared formula satellite cell.
-      private def emit_shared_ref(xml : XML::Builder, ref : String,
-                                  sfr : SharedFormulaRef, ss : SharedStrings)
-        cached = sfr.cached_value
-        case cached
-        in String
-          xml.element("c", r: ref, t: "str") do
-            xml.element("f", t: "shared", si: sfr.shared_index.to_s)
-            xml.element("v") { xml.text ss.intern(cached).to_s }
-          end
-        in Bool
-          xml.element("c", r: ref, t: "b") do
-            xml.element("f", t: "shared", si: sfr.shared_index.to_s)
-            xml.element("v") { xml.text cached ? "1" : "0" }
-          end
-        in Float64
-          xml.element("c", r: ref) do
-            xml.element("f", t: "shared", si: sfr.shared_index.to_s)
-            xml.element("v") { xml.text cached.to_s }
-          end
-        in Formula, SharedFormulaRef, Empty, Nil
-          xml.element("c", r: ref) do
-            xml.element("f", t: "shared", si: sfr.shared_index.to_s)
-          end
-        end
-      end
-
-      # Emits the <f> element for a Formula, including shared attributes if present.
-      private def emit_f_element(xml : XML::Builder, formula : Formula)
-        if si = formula.shared_index
-          if ref = formula.shared_ref
-            xml.element("f", t: "shared", si: si.to_s, ref: ref) { xml.text formula.expression }
-          else
-            xml.element("f", t: "shared", si: si.to_s) { xml.text formula.expression }
-          end
-        else
-          xml.element("f") { xml.text formula.expression }
         end
       end
     end

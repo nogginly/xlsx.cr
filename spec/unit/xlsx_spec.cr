@@ -29,8 +29,8 @@ Spectator.describe XLSX do
         XLSX::Internal::Zip.write(io, XLSX::Document.new([
           XLSX::Sheet.new("Data", {
             1 => XLSX::Row.new(1, {
-              1 => "header".as(XLSX::CellValue),
-              2 => "value".as(XLSX::CellValue),
+              1 => XLSX::Cell.new("header".as(XLSX::CellValue)),
+              2 => XLSX::Cell.new("value".as(XLSX::CellValue)),
             }),
           }),
         ]))
@@ -67,20 +67,21 @@ Spectator.describe XLSX do
         XLSX.build(io, template: template_io) { |sb| names << sb.name }
         expect(names).to eq(["Data"])
       end
-    end
-    it "yields a SheetBuilder once per sheet name, in order" do
-      seen = [] of String
-      XLSX.build(io, sheets: ["Sheet1", "Sheet2"]) { |sb| seen << sb.name }
-      expect(seen).to eq(["Sheet1", "Sheet2"])
-    end
 
-    it "writes a readable XLSX file with named sheets" do
-      XLSX.build(io, sheets: ["Alpha"]) do |sb|
-        sb.rows(1..1) { |row, _| row[1] = "data" }
+      it "yields a SheetBuilder once per sheet name, in order" do
+        seen = [] of String
+        XLSX.build(io, sheets: ["Sheet1", "Sheet2"]) { |sb| seen << sb.name }
+        expect(seen).to eq(["Sheet1", "Sheet2"])
       end
-      io.rewind
-      doc = XLSX::Document.open(io)
-      expect(doc["Alpha"][1, 1]).to eq("data")
+
+      it "writes a readable XLSX file with named sheets" do
+        XLSX.build(io, sheets: ["Alpha"]) do |sb|
+          sb.rows(1..1) { |row, _| row[1] = "data" }
+        end
+        io.rewind
+        doc = XLSX::Document.open(io)
+        expect(doc["Alpha"][1, 1]).to eq("data")
+      end
     end
   end
 end

@@ -79,11 +79,24 @@ module XLSX
         ss = SharedStrings.new
         sx = SheetXML.new
 
+        # Parse template workbook once so we can look up sheet targets below.
+        template_wb = template_entries.try do |entries|
+          wb = WorkbookXML.new
+          wb.parse_workbook(entries["xl/workbook.xml"]) if entries["xl/workbook.xml"]?
+          wb.parse_rels(entries["xl/_rels/workbook.xml.rels"]) if entries["xl/_rels/workbook.xml.rels"]?
+          wb
+        end
+
         # Pre-build all sheet XML so strings are interned before we write
         # the shared string table.
         sheet_xmls = [] of {String, String} # {sheet_name, xml}
         document.each do |sheet|
-          sheet_xmls << {sheet.name, sx.build(sheet, ss)}
+          template_sheet_xml = template_wb.try do |twb|
+            twb.target_for(sheet.name).try do |target|
+              template_entries.try(&.["xl/#{target}"]?)
+            end
+          end
+          sheet_xmls << {sheet.name, sx.build(sheet, ss, template_sheet_xml)}
         end
 
         sheet_names = sheet_xmls.map(&.[0])
@@ -134,9 +147,9 @@ module XLSX
         cells_map = {} of Int32 => Row
         rows.each_with_index do |row_values, i|
           row_id = i + 1
-          cells = {} of Int32 => CellValue
+          cells = {} of Int32 => Cell
           row_values.each_with_index do |val, j|
-            cells[j + 1] = val
+            cells[j + 1] = Cell.new(val)
           end
           cells_map[row_id] = Row.new(row_id, cells)
         end

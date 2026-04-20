@@ -24,6 +24,11 @@ module XLSX
       keys.min..keys.max
     end
 
+    # Returns the `Row` at *row_id*, or `nil` if absent.
+    def row(row_id : Int32) : Row?
+      @rows[row_id]?
+    end
+
     # Returns the cell at (*row_id*, *col_id*), or `nil` if either is absent.
     def [](row_id : Int32, col_id : Int32) : CellValue
       @rows[row_id]?.try(&.[](col_id))

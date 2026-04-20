@@ -1,7 +1,6 @@
 require "../spec_helper"
 
 Spectator.describe XLSX::Internal::Zip do
-  # Builds an in-memory Document, writes it to a MemoryIO, reads it back.
   def round_trip(document : XLSX::Document) : XLSX::Document
     io = IO::Memory.new
     XLSX::Internal::Zip.write(io, document)
@@ -9,29 +8,21 @@ Spectator.describe XLSX::Internal::Zip do
     XLSX::Internal::Zip.read(io)
   end
 
-  def make_sheet(name : String, data : Hash(Int32, Hash(Int32, XLSX::CellValue))) : XLSX::Sheet
-    rows = data.transform_values do |cells, row_id|
-      XLSX::Row.new(row_id, cells)
-    end
-    XLSX::Sheet.new(name, rows)
-  end
-
   describe ".write / .read round-trip" do
     context "with a single sheet and mixed cell types" do
       let(sheet) do
-        rows = {
+        XLSX::Sheet.new("Data", {
           1 => XLSX::Row.new(1, {
-            1 => "Alice".as(XLSX::CellValue),
-            2 => 42.0.as(XLSX::CellValue),
-            3 => true.as(XLSX::CellValue),
-            4 => XLSX::Empty::INSTANCE.as(XLSX::CellValue),
+            1 => XLSX::Cell.new("Alice".as(XLSX::CellValue)),
+            2 => XLSX::Cell.new(42.0.as(XLSX::CellValue)),
+            3 => XLSX::Cell.new(true.as(XLSX::CellValue)),
+            4 => XLSX::Cell.new(XLSX::Empty::INSTANCE.as(XLSX::CellValue)),
           }),
           3 => XLSX::Row.new(3, {
-            1 => "Bob".as(XLSX::CellValue),
-            2 => false.as(XLSX::CellValue),
+            1 => XLSX::Cell.new("Bob".as(XLSX::CellValue)),
+            2 => XLSX::Cell.new(false.as(XLSX::CellValue)),
           }),
-        }
-        XLSX::Sheet.new("Data", rows)
+        })
       end
 
       let(result) { round_trip(XLSX::Document.new([sheet])) }
@@ -69,13 +60,13 @@ Spectator.describe XLSX::Internal::Zip do
     context "with multiple sheets" do
       let(sheet1) do
         XLSX::Sheet.new("Sales", {
-          1 => XLSX::Row.new(1, {1 => "revenue".as(XLSX::CellValue)}),
+          1 => XLSX::Row.new(1, {1 => XLSX::Cell.new("revenue".as(XLSX::CellValue))}),
         })
       end
 
       let(sheet2) do
         XLSX::Sheet.new("Summary", {
-          1 => XLSX::Row.new(1, {1 => 99.0.as(XLSX::CellValue)}),
+          1 => XLSX::Row.new(1, {1 => XLSX::Cell.new(99.0.as(XLSX::CellValue))}),
         })
       end
 

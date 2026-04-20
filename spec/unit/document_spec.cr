@@ -50,7 +50,7 @@ Spectator.describe XLSX::Document do
     context "from IO" do
       it "reads a document written by Internal::Zip.write" do
         sheet = XLSX::Sheet.new("Test", {
-          1 => XLSX::Row.new(1, {1 => "hello".as(XLSX::CellValue)}),
+          1 => XLSX::Row.new(1, {1 => XLSX::Cell.new("hello".as(XLSX::CellValue))}),
         })
         io = IO::Memory.new
         XLSX::Internal::Zip.write(io, XLSX::Document.new([sheet]))

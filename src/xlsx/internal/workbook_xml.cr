@@ -90,6 +90,10 @@ module XLSX
             next if node["Type"]? == SHEET_TYPE
             preserved << {node["Id"], node["Type"], node["Target"]}
           end
+        else
+          # From-scratch: always include the standard non-worksheet relationships.
+          preserved << {"rId10", SHARED_STRINGS_TYPE, "sharedStrings.xml"}
+          preserved << {"rId11", STYLES_TYPE, "styles.xml"}
         end
 
         # Assign new rIds for worksheets, avoiding collisions with preserved ones.

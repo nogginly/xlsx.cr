@@ -53,8 +53,8 @@ module XLSX
     # Appends a row of values after the last present row.
     # Accepts any `Enumerable`.
     def append_row(values : Enumerable)
-      cells = {} of Int32 => CellValue
-      values.each_with_index { |v, i| cells[i + 1] = v.as(CellValue) }
+      cells = {} of Int32 => Cell
+      values.each_with_index { |v, i| cells[i + 1] = Cell.new(v.as(CellValue)) }
       @rows[@next_row_id] = Row.new(@next_row_id, cells)
       @next_row_id += 1
     end

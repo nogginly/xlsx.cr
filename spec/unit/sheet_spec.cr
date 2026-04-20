@@ -2,16 +2,16 @@ require "../spec_helper"
 
 Spectator.describe XLSX::Sheet do
   let(row1) do
-    cells = {} of Int32 => XLSX::CellValue
-    cells[1] = "A"
-    cells[2] = "B"
-    XLSX::Row.new(1, cells)
+    XLSX::Row.new(1, {
+      1 => XLSX::Cell.new("A".as(XLSX::CellValue)),
+      2 => XLSX::Cell.new("B".as(XLSX::CellValue)),
+    })
   end
 
   let(row3) do
-    cells = {} of Int32 => XLSX::CellValue
-    cells[1] = 42.0
-    XLSX::Row.new(3, cells)
+    XLSX::Row.new(3, {
+      1 => XLSX::Cell.new(42.0.as(XLSX::CellValue)),
+    })
   end
 
   # Rows 1 and 3 are present; row 2 is absent.
@@ -52,7 +52,7 @@ Spectator.describe XLSX::Sheet do
   end
 
   describe "#[]" do
-    it "returns the cell at a present row and col" do
+    it "returns the cell value at a present row and col" do
       expect(subject[1, 1]).to eq("A")
       expect(subject[1, 2]).to eq("B")
       expect(subject[3, 1]).to eq(42.0)
@@ -64,6 +64,16 @@ Spectator.describe XLSX::Sheet do
 
     it "returns nil for an absent row" do
       expect(subject[2, 1]).to be_nil
+    end
+  end
+
+  describe "#row" do
+    it "returns the Row at a present row_id" do
+      expect(subject.row(1)).not_to be_nil
+    end
+
+    it "returns nil for an absent row_id" do
+      expect(subject.row(2)).to be_nil
     end
   end
 

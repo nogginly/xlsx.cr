@@ -1,5 +1,31 @@
 require "../spec_helper"
 
+Spectator.describe XLSX::Cell do
+  describe ".new with value only" do
+    subject { XLSX::Cell.new("hello".as(XLSX::CellValue)) }
+
+    it "stores the value" do
+      expect(subject.value).to eq("hello")
+    end
+
+    it "has empty attrs" do
+      expect(subject.attrs).to be_empty
+    end
+  end
+
+  describe ".new with value and attrs" do
+    subject { XLSX::Cell.new(42.0.as(XLSX::CellValue), {"s" => "1"}) }
+
+    it "stores the value" do
+      expect(subject.value).to eq(42.0)
+    end
+
+    it "stores the attrs" do
+      expect(subject.attrs["s"]).to eq("1")
+    end
+  end
+end
+
 Spectator.describe XLSX::Empty do
   subject { XLSX::Empty::INSTANCE }
 

@@ -153,11 +153,15 @@ Spectator.describe XLSX::Internal::SheetXML do
     let(ss_write) { XLSX::Internal::SharedStrings.new }
 
     let(sheet) do
-      cells1 = {1 => "Alice".as(XLSX::CellValue), 2 => 99.0.as(XLSX::CellValue)}
-      cells2 = {1 => true.as(XLSX::CellValue), 2 => XLSX::Empty::INSTANCE.as(XLSX::CellValue)}
       rows = {
-        1 => XLSX::Row.new(1, cells1),
-        2 => XLSX::Row.new(2, cells2),
+        1 => XLSX::Row.new(1, {
+          1 => XLSX::Cell.new("Alice".as(XLSX::CellValue)),
+          2 => XLSX::Cell.new(99.0.as(XLSX::CellValue)),
+        }),
+        2 => XLSX::Row.new(2, {
+          1 => XLSX::Cell.new(true.as(XLSX::CellValue)),
+          2 => XLSX::Cell.new(XLSX::Empty::INSTANCE.as(XLSX::CellValue)),
+        }),
       }
       XLSX::Sheet.new("Out", rows)
     end
@@ -178,9 +182,9 @@ Spectator.describe XLSX::Internal::SheetXML do
     end
 
     it "does not write nil cells" do
-      cells = {1 => nil.as(XLSX::CellValue)}
-      rows = {1 => XLSX::Row.new(1, cells)}
-      nil_sheet = XLSX::Sheet.new("N", rows)
+      nil_sheet = XLSX::Sheet.new("N", {
+        1 => XLSX::Row.new(1, {1 => XLSX::Cell.new(nil.as(XLSX::CellValue))}),
+      })
       xml = subject.build(nil_sheet, ss_write)
       expect(xml).not_to contain("<c ")
     end
@@ -272,8 +276,9 @@ Spectator.describe "XLSX::Internal::SheetXML formula handling" do
   describe "#build — round-trips formulas" do
     it "round-trips a plain formula" do
       formula = XLSX::Formula.new("SUM(B1:B5)", 42.0.as(XLSX::CellValue))
-      rows = {1 => XLSX::Row.new(1, {1 => formula.as(XLSX::CellValue)})}
-      sheet = XLSX::Sheet.new("S", rows)
+      sheet = XLSX::Sheet.new("S", {
+        1 => XLSX::Row.new(1, {1 => XLSX::Cell.new(formula.as(XLSX::CellValue))}),
+      })
       xml = subject.build(sheet, ss)
       parsed = subject.parse("S", xml, ss)
       result = parsed[1, 1].as(XLSX::Formula)
@@ -285,11 +290,10 @@ Spectator.describe "XLSX::Internal::SheetXML formula handling" do
       master = XLSX::Formula.new("A1*2", 10.0.as(XLSX::CellValue),
         shared_index: 0, shared_ref: "B1:B2")
       satellite = XLSX::SharedFormulaRef.new(0, 20.0.as(XLSX::CellValue))
-      rows = {
-        1 => XLSX::Row.new(1, {2 => master.as(XLSX::CellValue)}),
-        2 => XLSX::Row.new(2, {2 => satellite.as(XLSX::CellValue)}),
-      }
-      sheet = XLSX::Sheet.new("S", rows)
+      sheet = XLSX::Sheet.new("S", {
+        1 => XLSX::Row.new(1, {2 => XLSX::Cell.new(master.as(XLSX::CellValue))}),
+        2 => XLSX::Row.new(2, {2 => XLSX::Cell.new(satellite.as(XLSX::CellValue))}),
+      })
       xml = subject.build(sheet, ss)
       parsed = subject.parse("S", xml, ss)
 
@@ -301,6 +305,81 @@ Spectator.describe "XLSX::Internal::SheetXML formula handling" do
       sfr = parsed[2, 2].as(XLSX::SharedFormulaRef)
       expect(sfr.shared_index).to eq(0)
       expect(sfr.cached_value).to eq(20.0)
+    end
+  end
+end
+
+Spectator.describe "XLSX::Internal::SheetXML template preservation" do
+  subject { XLSX::Internal::SheetXML.new }
+
+  let(ss) { XLSX::Internal::SharedStrings.new }
+
+  let(template_xml) do
+    <<-XML
+    <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+      <sheetViews>
+        <sheetView workbookViewId="0">
+          <pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>
+        </sheetView>
+      </sheetViews>
+      <sheetData>
+        <row r="1" s="1" customFormat="1">
+          <c r="A1" s="1" t="s"><v>0</v></c>
+        </row>
+      </sheetData>
+      <pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>
+    </worksheet>
+    XML
+  end
+
+  describe "#parse — preserves row and cell attrs" do
+    it "stores row-level attrs" do
+      ss.intern("Header")
+      sheet = subject.parse("S", template_xml, ss)
+      row = sheet.row(1)
+      expect(row).not_to be_nil
+      expect(row.not_nil!.attrs["s"]).to eq("1")
+      expect(row.not_nil!.attrs["customFormat"]).to eq("1")
+    end
+
+    it "stores cell-level attrs" do
+      ss.intern("Header")
+      sheet = subject.parse("S", template_xml, ss)
+      cell = sheet.row(1).not_nil!.cell(1)
+      expect(cell).not_to be_nil
+      expect(cell.not_nil!.attrs["s"]).to eq("1")
+    end
+  end
+
+  describe "#build with template_xml" do
+    it "preserves sheetViews (freeze pane)" do
+      ss.intern("Header")
+      sheet = subject.parse("S", template_xml, ss)
+      output = subject.build(sheet, ss, template_xml)
+      expect(output).to contain("frozen")
+      expect(output).to contain("sheetViews")
+    end
+
+    it "preserves pageMargins" do
+      ss.intern("Header")
+      sheet = subject.parse("S", template_xml, ss)
+      output = subject.build(sheet, ss, template_xml)
+      expect(output).to contain("pageMargins")
+    end
+
+    it "re-emits row style attrs" do
+      ss.intern("Header")
+      sheet = subject.parse("S", template_xml, ss)
+      output = subject.build(sheet, ss, template_xml)
+      expect(output).to contain("customFormat")
+    end
+
+    it "re-emits cell style attrs" do
+      ss.intern("Header")
+      sheet = subject.parse("S", template_xml, ss)
+      output = subject.build(sheet, ss, template_xml)
+      expect(output).to match(/c r="A1"[^>]*s="1"/)
     end
   end
 end

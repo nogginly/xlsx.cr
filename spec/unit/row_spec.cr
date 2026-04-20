@@ -3,11 +3,11 @@ require "../spec_helper"
 Spectator.describe XLSX::Row do
   # A sparse row: cols 1, 3, 5 are present; 2 and 4 are absent.
   let(cells) do
-    cells = {} of Int32 => XLSX::CellValue
-    cells[1] = "Alice"
-    cells[3] = 42.0
-    cells[5] = true
-    cells
+    {
+      1 => XLSX::Cell.new("Alice".as(XLSX::CellValue)),
+      3 => XLSX::Cell.new(42.0.as(XLSX::CellValue)),
+      5 => XLSX::Cell.new(true.as(XLSX::CellValue)),
+    }
   end
 
   subject { XLSX::Row.new(2, cells) }
@@ -32,13 +32,30 @@ Spectator.describe XLSX::Row do
     end
   end
 
+  describe "#cell" do
+    it "returns the Cell at a present col_id" do
+      c = subject.cell(1)
+      expect(c).not_to be_nil
+      expect(c.not_nil!.value).to eq("Alice")
+    end
+
+    it "returns nil for an absent col_id" do
+      expect(subject.cell(2)).to be_nil
+    end
+
+    it "preserves attrs" do
+      row = XLSX::Row.new(1, {1 => XLSX::Cell.new("v".as(XLSX::CellValue), {"s" => "2"})})
+      expect(row.cell(1).not_nil!.attrs["s"]).to eq("2")
+    end
+  end
+
   describe "#col_span" do
     it "spans from the first to last present col_id" do
       expect(subject.col_span).to eq(1..5)
     end
 
     context "with a single cell" do
-      subject { XLSX::Row.new(1, {4 => "only".as(XLSX::CellValue)}) }
+      subject { XLSX::Row.new(1, {4 => XLSX::Cell.new("only".as(XLSX::CellValue))}) }
 
       it "returns a unit range" do
         expect(subject.col_span).to eq(4..4)
@@ -46,7 +63,7 @@ Spectator.describe XLSX::Row do
     end
 
     context "with no cells" do
-      subject { XLSX::Row.new(1, {} of Int32 => XLSX::CellValue) }
+      subject { XLSX::Row.new(1, {} of Int32 => XLSX::Cell) }
 
       it "raises on an empty row" do
         expect { subject.col_span }.to raise_error(Enumerable::EmptyError)
@@ -55,7 +72,7 @@ Spectator.describe XLSX::Row do
   end
 
   describe "#each_cell" do
-    it "yields cells in ascending col_id order" do
+    it "yields cell values in ascending col_id order" do
       col_ids = [] of Int32
       subject.each_cell { |_, col_id| col_ids << col_id }
       expect(col_ids).to eq([1, 3, 5])
@@ -75,6 +92,30 @@ Spectator.describe XLSX::Row do
     end
   end
 
+  describe "#each_cell_full" do
+    it "yields Cell objects with attrs" do
+      row = XLSX::Row.new(1, {
+        1 => XLSX::Cell.new("v".as(XLSX::CellValue), {"s" => "1"}),
+      })
+      row.each_cell_full do |cell, col_id|
+        expect(cell.attrs["s"]).to eq("1")
+        expect(col_id).to eq(1)
+      end
+    end
+  end
+
+  describe "#attrs" do
+    it "returns empty hash by default" do
+      expect(subject.attrs).to be_empty
+    end
+
+    it "preserves row-level attrs" do
+      row = XLSX::Row.new(1, {} of Int32 => XLSX::Cell, {"customFormat" => "1", "s" => "2"})
+      expect(row.attrs["customFormat"]).to eq("1")
+      expect(row.attrs["s"]).to eq("2")
+    end
+  end
+
   describe "#size" do
     it "returns the count of present cells" do
       expect(subject.size).to eq(3)
@@ -87,7 +128,7 @@ Spectator.describe XLSX::Row do
     end
 
     context "with no cells" do
-      subject { XLSX::Row.new(1, {} of Int32 => XLSX::CellValue) }
+      subject { XLSX::Row.new(1, {} of Int32 => XLSX::Cell) }
 
       it "is true" do
         expect(subject.empty?).to be_true
