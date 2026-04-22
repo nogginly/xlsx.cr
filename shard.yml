@@ -1,5 +1,5 @@
 name: xlsx
-version: 0.1.0
+version: 0.2.0
 
 authors:
   - nogginly <nogginly@icloud.com>
@@ -11,3 +11,7 @@ development_dependencies:
     github: crystal-ameba/ameba
   spectator:
     gitlab: arctic-fox/spectator
+
+targets:
+  csv2xlsx:
+    main: samples/csv2xlsx.cr
