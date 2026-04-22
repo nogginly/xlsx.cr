@@ -20,21 +20,18 @@
 
 ### Build and run for development
 
-> TODO - FIX
+Use `ops run samples/<SOURCEFILE>` to compile and run the specific source. Without parameters you will get some usage info.
 
-Use `ops run samples/<SOURCEFILE>` to compile and run the specific source.
+### Verify passing tests
+
+Use `ops test` to run the tests. Make sure they all pass.
 
 ### Build to run later
 
-> TODO - FIX
+The `samples/csv2xlsx.cr` app is built as a pre-defined target.
 
-Run `ops build-release` to make a release build in the `bin/release/` folder
-
-Run `ops build-debug` to make a debug build in the `bin/debug/` folder
-
-## Samples
-
-> Coming soon
+1. Run `ops build-release` to make a release build in the `bin/release/` folder
+2. Run `ops build-debug` to make a debug build in the `bin/debug/` folder
 
 ## Contributions
 
