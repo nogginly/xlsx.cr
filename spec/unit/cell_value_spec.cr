@@ -137,6 +137,11 @@ Spectator.describe "XLSX::CellValue" do
     expect(cell).to eq(3.14)
   end
 
+  it "accepts DateValue values" do
+    cell : XLSX::CellValue = XLSX::DateValue.date_only(Time.utc(2026, 4, 20))
+    expect(cell).to be_a(XLSX::DateValue)
+  end
+
   it "accepts Bool values" do
     cell : XLSX::CellValue = true
     expect(cell).to eq(true)

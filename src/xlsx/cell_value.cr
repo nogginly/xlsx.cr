@@ -87,6 +87,46 @@ module XLSX
     end
   end
 
+  # A date/time cell value pairing a `Time` with a style index into the
+  # workbook's `cellXfs` table.
+  #
+  # The `style_index` controls how Excel displays the value (date-only,
+  # time-only, or date+time). Treat it as opaque — use the factory methods
+  # for new values, and values read from a file carry the original style.
+  #
+  # Wall-clock UTC semantics apply: timezone offset is discarded on write,
+  # and values are reconstructed as UTC on read.
+  struct DateValue
+    getter value : Time
+    getter style_index : Int32
+
+    protected def initialize(@value : Time, @style_index : Int32)
+    end
+
+    # Creates a date-only cell using the default date display format.
+    def self.date_only(time : Time) : self
+      new(time, Internal::StylesXML::DEFAULT_DATE_STYLE)
+    end
+
+    # Creates a time-only cell using the default time display format.
+    def self.time_only(time : Time) : self
+      new(time, Internal::StylesXML::DEFAULT_TIME_STYLE)
+    end
+
+    # Creates a date+time cell using the default date+time display format.
+    def self.date_time(time : Time) : self
+      new(time, Internal::StylesXML::DEFAULT_DATE_TIME_STYLE)
+    end
+
+    def to_s(io : IO) : Nil
+      io << @value
+    end
+
+    def ==(other : DateValue) : Bool
+      @value == other.value && @style_index == other.style_index
+    end
+  end
+
   # The full set of values a cell can hold.
   #
   # - `String`           — shared string cell (interned in sharedStrings.xml)
@@ -94,9 +134,10 @@ module XLSX
   # - `Int64`            — integer numeric cell (write convenience; Excel stores as float)
   # - `Float64`          — floating point numeric cell
   # - `Bool`             — boolean cell
+  # - `DateValue`        — date/time cell with display style (wall-clock UTC semantics)
   # - `Formula`          — formula cell with cached result
   # - `SharedFormulaRef` — satellite cell in a shared formula group
   # - `Empty`            — cell element present in XML, but no value child
   # - `Nil`              — cell element absent from XML entirely
-  alias CellValue = String | InlineStr | Int64 | Float64 | Bool | Formula | SharedFormulaRef | Empty | Nil
+  alias CellValue = String | InlineStr | Int64 | Float64 | Bool | DateValue | Formula | SharedFormulaRef | Empty | Nil
 end

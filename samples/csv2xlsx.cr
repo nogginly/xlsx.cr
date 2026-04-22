@@ -2,13 +2,21 @@ require "csv"
 
 require "../src/xlsx"
 
+private def parse_time?(value, fmt)
+  Time.parse(value, fmt, Time::Location::UTC)
+rescue _ex
+  nil
+end
+
 USAGE = "Usage: csv2xlsx <csv_file> <output_xlsx_file>\nRead a CSV file and export it as an XLSX file."
 csv_file = ARGV[0]? || abort(USAGE)
 output_xlsx_file = ARGV[1]? || abort(USAGE)
+today = Time.utc
 
 count = 0
 count_ints = 0
 count_floats = 0
+count_times = 0
 
 File.open(csv_file, "r") do |csv_io|
   File.open(output_xlsx_file, "w") do |out_io|
@@ -18,6 +26,16 @@ File.open(csv_file, "r") do |csv_io|
         csv_row.each do |value|
           if ["true", "false"].includes?(value)
             cells << value == "true" ? true : false
+          elsif date = parse_time?(value, "%Y-%m-%d")
+            count_times += 1
+            cells << XLSX::DateValue.date_only(date)
+          elsif time = parse_time?(value, "%H:%M:%S") || parse_time?(value, "%H:%M")
+            time = Time.utc(today.year, today.month, today.day, time.hour, time.minute, time.second)
+            count_times += 1
+            cells << XLSX::DateValue.time_only(time)
+          elsif date_time = parse_time?(value, "%Y-%m-%d %H:%M:%S %z")
+            count_times += 1
+            cells << XLSX::DateValue.date_time(date_time)
           elsif i64 = value.to_i64?
             count_ints += 1
             cells << i64
@@ -38,3 +56,4 @@ end
 puts "Converted #{count} rows."
 puts "  - Found #{count_ints} incoming integers"
 puts "  - Found #{count_floats} incoming floats"
+puts "  - Found #{count_times} incoming dates/times"

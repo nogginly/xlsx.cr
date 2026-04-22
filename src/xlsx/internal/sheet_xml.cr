@@ -19,7 +19,9 @@ module XLSX
       # *name*           — the sheet name (from workbook.xml)
       # *xml*            — content of the worksheet XML file
       # *shared_strings* — the shared string table for the workbook
-      def parse(name : String, xml : String, shared_strings : SharedStrings) : Sheet
+      # *styles*         — styles table for date format detection
+      def parse(name : String, xml : String, shared_strings : SharedStrings,
+                styles : StylesXML? = nil) : Sheet
         rows = Hash(Int32, Row).new
         doc = XML.parse(xml)
 
@@ -35,6 +37,7 @@ module XLSX
             v_node = cell_node.xpath_node("ns:v", NS_MAP)
             f_node = cell_node.xpath_node("ns:f", NS_MAP)
             cell_attrs = node_attrs(cell_node, except: "r")
+            style_idx = cell_node["s"]?.try(&.to_i)
 
             value : CellValue = if f_node
               parse_formula(f_node, v_node, type, shared_strings)
@@ -48,10 +51,16 @@ module XLSX
             elsif type == "b"
               v_node.content == "1"
             else
+              raw = v_node.content
               if type.nil?
-                v_node.content.to_f64
+                num = raw.to_f64
+                if style_idx && styles && styles.date_format?(style_idx)
+                  DateValue.new(styles.serial_to_time(num), style_idx)
+                else
+                  num
+                end
               else
-                v_node.content
+                raw
               end
             end
 
@@ -74,8 +83,9 @@ module XLSX
       # When *template_row_ids* is supplied, row IDs in that set are treated as
       # existing and their stored attrs are emitted; others are treated as new.
       def build(sheet : Sheet, shared_strings : SharedStrings,
-                template_xml : String? = nil) : String
-        sheet_data = build_sheet_data(sheet, shared_strings)
+                template_xml : String? = nil,
+                styles : StylesXML? = nil) : String
+        sheet_data = build_sheet_data(sheet, shared_strings, styles)
 
         if raw = template_xml
           raw.gsub(/<sheetData>.*?<\/sheetData>|<sheetData\/>/m, sheet_data)
@@ -121,7 +131,8 @@ module XLSX
 
       # Builds the `<sheetData>...</sheetData>` string for *sheet*.
       # Row and cell attrs stored on the model are re-emitted verbatim.
-      private def build_sheet_data(sheet : Sheet, ss : SharedStrings) : String
+      private def build_sheet_data(sheet : Sheet, ss : SharedStrings,
+                                   styles : StylesXML? = nil) : String
         String.build do |s|
           s << "<sheetData>"
           sheet.each_row do |row, row_id|
@@ -130,7 +141,7 @@ module XLSX
             s << ">"
             row.each_cell_full do |cell, col_id|
               ref = cell_ref(row_id, col_id)
-              s << emit_cell_string(ref, cell, ss)
+              s << emit_cell_string(ref, cell, ss, styles)
             end
             s << "</row>"
           end
@@ -138,7 +149,8 @@ module XLSX
         end
       end
 
-      private def emit_cell_string(ref : String, cell : Cell, ss : SharedStrings) : String
+      private def emit_cell_string(ref : String, cell : Cell, ss : SharedStrings,
+                                   styles : StylesXML? = nil) : String
         extra = cell.attrs.reject("t").map { |k, v| " #{k}=\"#{HTML.escape(v)}\"" }.join
         value = cell.value
         case value
@@ -151,12 +163,16 @@ module XLSX
           %(<c r="#{ref}"#{extra}><v>#{value}</v></c>)
         in Float64
           %(<c r="#{ref}"#{extra}><v>#{value}</v></c>)
+        in DateValue
+          serial = (styles || StylesXML.new).time_to_serial(value.value)
+          extra_no_s = cell.attrs.reject("t").reject("s").map { |k, v| " #{k}=\"#{HTML.escape(v)}\"" }.join
+          %(<c r="#{ref}" s="#{value.style_index}"#{extra_no_s}><v>#{serial}</v></c>)
         in Bool
           %(<c r="#{ref}" t="b"#{extra}><v>#{value ? "1" : "0"}</v></c>)
         in Formula
-          emit_formula_string(ref, value, cell.attrs.reject("t"), ss)
+          emit_formula_string(ref, value, cell.attrs.reject("t"), ss, styles)
         in SharedFormulaRef
-          emit_shared_ref_string(ref, value, cell.attrs.reject("t"), ss)
+          emit_shared_ref_string(ref, value, cell.attrs.reject("t"), ss, styles)
         in Empty
           %(<c r="#{ref}"#{extra}/>)
         in Nil
@@ -166,10 +182,11 @@ module XLSX
 
       private def emit_formula_string(ref : String, formula : Formula,
                                       extra_attrs : Hash(String, String),
-                                      ss : SharedStrings) : String
+                                      ss : SharedStrings,
+                                      styles : StylesXML? = nil) : String
         extra = extra_attrs.map { |k, v| " #{k}=\"#{HTML.escape(v)}\"" }.join
         cached = formula.cached_value
-        t_attr, v_content = formula_type_and_value(cached, ss)
+        t_attr, v_content = formula_type_and_value(cached, styles)
         t_str = t_attr ? " t=\"#{t_attr}\"" : ""
         f_str = emit_f_string(formula)
         v_str = v_content ? "<v>#{v_content}</v>" : ""
@@ -178,9 +195,10 @@ module XLSX
 
       private def emit_shared_ref_string(ref : String, sfr : SharedFormulaRef,
                                          extra_attrs : Hash(String, String),
-                                         ss : SharedStrings) : String
+                                         ss : SharedStrings,
+                                         styles : StylesXML? = nil) : String
         extra = extra_attrs.map { |k, v| " #{k}=\"#{HTML.escape(v)}\"" }.join
-        t_attr, v_content = formula_type_and_value(sfr.cached_value, ss)
+        t_attr, v_content = formula_type_and_value(sfr.cached_value, styles)
         t_str = t_attr ? " t=\"#{t_attr}\"" : ""
         f_str = %(<f t="shared" si="#{sfr.shared_index}"/>)
         v_str = v_content ? "<v>#{v_content}</v>" : ""
@@ -199,13 +217,14 @@ module XLSX
 
       # Returns {t_attribute, v_content} for a formula's cached value.
       private def formula_type_and_value(cached : CellValue,
-                                         ss : SharedStrings) : {String?, String?}
+                                         styles : StylesXML? = nil) : {String?, String?}
         case cached
-        in String                                then {"str", ss.intern(cached).to_s}
-        in InlineStr                             then {"str", ss.intern(cached.value).to_s}
+        in String                                then {"str", cached}       # t="str" → value direct in <v>, not interned
+        in InlineStr                             then {"str", cached.value} # same
         in Int64                                 then {nil, cached.to_s}
         in Float64                               then {nil, cached.to_s}
         in Bool                                  then {"b", cached ? "1" : "0"}
+        in DateValue                             then {nil, (styles || StylesXML.new).time_to_serial(cached.value).to_s}
         in Formula, SharedFormulaRef, Empty, Nil then {nil, nil}
         end
       end

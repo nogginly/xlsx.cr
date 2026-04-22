@@ -146,6 +146,114 @@ Spectator.describe XLSX::Internal::SheetXML do
   end
 
   # -------------------------------------------------------------------------
+  # Date / Time support
+  # -------------------------------------------------------------------------
+
+  describe "#parse — date cells" do
+    let(styles) do
+      sx = XLSX::Internal::StylesXML.new
+      sx.parse(<<-XML)
+      <?xml version="1.0" encoding="UTF-8"?>
+      <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+        <cellXfs count="2">
+          <xf numFmtId="0"/>
+          <xf numFmtId="14"/>
+        </cellXfs>
+      </styleSheet>
+      XML
+      sx
+    end
+
+    let(date_xml) do
+      <<-XML
+      <?xml version="1.0" encoding="UTF-8"?>
+      <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+        <sheetData>
+          <row r="1">
+            <c r="A1" s="1"><v>46132</v></c>
+            <c r="B1"><v>46132</v></c>
+          </row>
+        </sheetData>
+      </worksheet>
+      XML
+    end
+
+    it "returns DateValue for a cell with a date style" do
+      ss = XLSX::Internal::SharedStrings.new
+      sheet = subject.parse("S", date_xml, ss, styles)
+      expect(sheet[1, 1]).to be_a(XLSX::DateValue)
+    end
+
+    it "returns Float64 for a cell without a date style" do
+      ss = XLSX::Internal::SharedStrings.new
+      sheet = subject.parse("S", date_xml, ss, styles)
+      expect(sheet[1, 2]).to be_a(Float64)
+    end
+
+    it "converts the serial number to the correct date" do
+      ss = XLSX::Internal::SharedStrings.new
+      sheet = subject.parse("S", date_xml, ss, styles)
+      t = sheet[1, 1].as(XLSX::DateValue).value
+      expect(t.year).to eq(2026)
+      expect(t.month).to eq(4)
+      expect(t.day).to eq(20)
+    end
+
+    it "preserves the style index from the cell" do
+      ss = XLSX::Internal::SharedStrings.new
+      sheet = subject.parse("S", date_xml, ss, styles)
+      dv = sheet[1, 1].as(XLSX::DateValue)
+      expect(dv.style_index).to eq(1)
+    end
+  end
+
+  describe "#build — DateValue cells" do
+    let(ss) { XLSX::Internal::SharedStrings.new }
+
+    it "writes DateValue with the correct s attribute" do
+      sheet = XLSX::Sheet.new("S", {
+        1 => XLSX::Row.new(1, {
+          1 => XLSX::Cell.new(XLSX::DateValue.date_only(Time.utc(2026, 4, 20)).as(XLSX::CellValue)),
+        }),
+      })
+      xml = subject.build(sheet, ss)
+      expect(xml).to contain(%[s="#{XLSX::Internal::StylesXML::DEFAULT_DATE_STYLE}"])
+    end
+
+    it "round-trips DateValue through parse with matching styles" do
+      styles = XLSX::Internal::StylesXML.new
+      styles.parse(<<-XML)
+      <?xml version="1.0" encoding="UTF-8"?>
+      <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+        <cellXfs count="2">
+          <xf numFmtId="0"/>
+          <xf numFmtId="14"/>
+        </cellXfs>
+      </styleSheet>
+      XML
+
+      sheet = XLSX::Sheet.new("S", {
+        1 => XLSX::Row.new(1, {
+          1 => XLSX::Cell.new(XLSX::DateValue.date_only(Time.utc(2026, 4, 20)).as(XLSX::CellValue)),
+        }),
+      })
+      xml = subject.build(sheet, ss, nil, styles)
+      parsed = subject.parse("S", xml, ss, styles)
+      dv = parsed[1, 1].as(XLSX::DateValue)
+      expect(dv.value.year).to eq(2026)
+      expect(dv.value.month).to eq(4)
+      expect(dv.value.day).to eq(20)
+    end
+
+    it "uses wall-clock value regardless of timezone" do
+      utc = Time.utc(2026, 4, 20, 9, 30, 0)
+      local = Time.local(2026, 4, 20, 9, 30, 0)
+      styles = XLSX::Internal::StylesXML.new
+      expect(styles.time_to_serial(utc)).to be_close(styles.time_to_serial(local), 0.0001)
+    end
+  end
+
+  # -------------------------------------------------------------------------
   # InlineStr support
   # -------------------------------------------------------------------------
 

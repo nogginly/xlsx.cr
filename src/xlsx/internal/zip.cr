@@ -33,6 +33,7 @@ module XLSX
         wb = WorkbookXML.new
         ss = SharedStrings.new
         sx = SheetXML.new
+        styles = StylesXML.new
 
         wb.parse_workbook(entries["xl/workbook.xml"])
         wb.parse_rels(entries["xl/_rels/workbook.xml.rels"])
@@ -41,10 +42,14 @@ module XLSX
           ss.parse(raw_ss)
         end
 
+        if raw_styles = entries["xl/styles.xml"]?
+          styles.parse(raw_styles)
+        end
+
         sheets = wb.sheet_names.map do |name|
           target = wb.target_for(name).not_nil!
           xml = entries["xl/#{target}"]
-          sx.parse(name, xml, ss)
+          sx.parse(name, xml, ss, styles)
         end
 
         Document.new(sheets)
@@ -89,6 +94,11 @@ module XLSX
 
         # Pre-build all sheet XML so strings are interned before we write
         # the shared string table.
+        template_styles = StylesXML.new
+        if raw_styles = template_entries.try(&.["xl/styles.xml"]?)
+          template_styles.parse(raw_styles)
+        end
+
         sheet_xmls = [] of {String, String} # {sheet_name, xml}
         document.each do |sheet|
           template_sheet_xml = template_wb.try do |twb|
@@ -96,7 +106,7 @@ module XLSX
               template_entries.try(&.["xl/#{target}"]?)
             end
           end
-          sheet_xmls << {sheet.name, sx.build(sheet, ss, template_sheet_xml)}
+          sheet_xmls << {sheet.name, sx.build(sheet, ss, template_sheet_xml, template_styles)}
         end
 
         sheet_names = sheet_xmls.map(&.[0])
@@ -249,8 +259,12 @@ module XLSX
             xml.element("cellStyleXfs", count: "1") do
               xml.element("xf", numFmtId: "0", fontId: "0", fillId: "0", borderId: "0")
             end
-            xml.element("cellXfs", count: "1") do
+            # xf index 0: general, 1: date-only (14), 2: time-only (20), 3: date+time (22)
+            xml.element("cellXfs", count: "4") do
               xml.element("xf", numFmtId: "0", fontId: "0", fillId: "0", borderId: "0", xfId: "0")
+              xml.element("xf", numFmtId: "14", fontId: "0", fillId: "0", borderId: "0", xfId: "0")
+              xml.element("xf", numFmtId: "20", fontId: "0", fillId: "0", borderId: "0", xfId: "0")
+              xml.element("xf", numFmtId: "22", fontId: "0", fillId: "0", borderId: "0", xfId: "0")
             end
           end
         end
