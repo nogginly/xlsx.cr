@@ -2,71 +2,79 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
   pull_request:
-    branches: [main]
+    branches: [ main ]
 
 jobs:
   build-and-test:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - { os: ubuntu-latest, crystal: 1.18 }
+          - { os: ubuntu-latest, crystal: 1.19 }
+          - { os: ubuntu-latest, crystal: latest }
+          - { os: macos-latest, crystal: latest }
+          - { os: macos-15-intel, crystal: latest }
+          - { os: windows-latest, crystal: 1.18 } # Newer Crystal releases failing to install
 
     runs-on: ${{ matrix.os }}
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v6
+      - name: Checkout code
+        uses: actions/checkout@v6
 
-    - name: Install Crystal
-      uses: crystal-lang/install-crystal@v1
+      - name: Install Crystal
+        uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: ${{matrix.crystal}}
 
-    - name: Cache shards
-      uses: actions/cache@v5
-      with:
-        path: |
-          lib
-          bin/ameba
-        key: ${{ runner.os }}-shards-${{ hashFiles('**/shard.lock') }}
+      - name: Cache shards
+        uses: actions/cache@v5
+        with:
+          path: |
+            lib
+            bin/ameba
+          key: ${{ runner.os }}-shards-${{ hashFiles('**/shard.lock') }}
 
-    - name: Install shards
-      run: shards check || shards install
+      - name: Install shards
+        run: shards check || shards install
 
-    # ---- Build debug release and check code quality on one platform
+      # ---- Build debug release and check code quality on one platform
 
-    - name: Setup debug environment (Linux)
-      if: ${{ runner.os == 'Linux' }}
-      run: mkdir -p bin/debug
+      - name: Setup debug environment (Linux)
+        if: ${{ runner.os == 'Linux' }}
+        run: mkdir -p bin/debug
 
-    - name: Build Debug (Linux)
-      if: ${{ runner.os == 'Linux' }}
-      run: SHARDS_BIN_PATH=bin/debug shards build --debug
+      - name: Build Debug (Linux)
+        if: ${{ runner.os == 'Linux' }}
+        run: SHARDS_BIN_PATH=bin/debug shards build --debug
 
-    - name: Check formatting (Linux)
-      if: ${{ runner.os == 'Linux' }}
-      run: crystal tool format; git diff --exit-code src
+      - name: Check formatting (Linux)
+        if: ${{ runner.os == 'Linux' }}
+        run: crystal tool format; git diff --exit-code src
 
-    # # Needs work, not passing yet
-    # - name: Run static code analysis (Linux)
-    #   if: ${{ runner.os == 'Linux' }}
-    #   run: bin/ameba src/
+      # # Needs work, not passing yet
+      # - name: Run static code analysis (Linux)
+      #   if: ${{ runner.os == 'Linux' }}
+      #   run: bin/ameba src/
 
-    - name: Run tests (Linux)
-      if: ${{ runner.os == 'Linux' }}
-      run: crystal spec -Dtest
+      - name: Run tests (Linux)
+        if: ${{ runner.os == 'Linux' }}
+        run: crystal spec -Dtest
 
-    # ---- Build releases on all platforms
+      # ---- Build releases on all platforms
 
-    # Non-Windows
-    - name: Setup release environment
-      if: ${{ runner.os != 'Windows' }}
-      run: mkdir -p bin/release
+      # Non-Windows
+      - name: Setup release environment
+        if: ${{ runner.os != 'Windows' }}
+        run: mkdir -p bin/release
 
-    - name: Build Release
-      if: ${{ runner.os != 'Windows' }}
-      run: SHARDS_BIN_PATH=bin/release shards build --release
+      - name: Build Release
+        if: ${{ runner.os != 'Windows' }}
+        run: SHARDS_BIN_PATH=bin/release shards build --release
 
-    - name: Run Sample `csv2xlsx`
-      if: ${{ runner.os != 'Windows' }}
-      run: bin/release/csv2xlsx 2>&1 | grep "Usage"
+      - name: Run Sample `csv2xlsx`
+        if: ${{ runner.os != 'Windows' }}
+        run: bin/release/csv2xlsx 2>&1 | grep "Usage"
