@@ -1,8 +1,6 @@
 module XLSX
-  # Builds a single `Sheet` by iterating a row span or appending rows.
-  #
-  # Can be pre-populated from an existing `Sheet` to support template-based
-  # building, where existing content is preserved and new rows are appended.
+  # Builds one `Sheet` from row spans and appended rows. Built from an existing
+  # sheet with `.from_sheet`, it keeps that sheet's rows and appends after them.
   class SheetBuilder
     getter name : String
 
@@ -14,8 +12,8 @@ module XLSX
     private def initialize(@name : String, @rows : Hash(Int32, Row), @next_row_id : Int32)
     end
 
-    # Pre-populates this builder from an existing `Sheet`.
-    # Existing rows are carried over and `append_row` will add after them.
+    # Creates a builder holding *sheet*'s rows, so `append_row` continues after
+    # its last row.
     def self.from_sheet(sheet : Sheet) : self
       rows = {} of Int32 => Row
       next_row_id = 1
@@ -26,8 +24,9 @@ module XLSX
       new(sheet.name, rows, next_row_id)
     end
 
-    # Iterates *span*, yielding a `RowBuilder` and 1-based row ID for each row.
-    # The built row is collected after each block call.
+    # Builds each row in *span*, yielding a `RowBuilder` and the row ID. Each
+    # row starts empty and replaces any existing row with that ID, so in a
+    # template the row's previous cells and attributes are discarded.
     #
     # ```
     # sheet.rows(3..10) do |row, row_id|
@@ -44,14 +43,13 @@ module XLSX
       end
     end
 
-    # Appends a row of values after the last present row.
-    # Accepts a splat of `CellValue` items.
+    # Appends a row of values in columns 1 onwards, after the highest row ID
+    # written so far.
     def append_row(*values : CellValue)
       append_row(values)
     end
 
-    # Appends a row of values after the last present row.
-    # Accepts any `Enumerable`.
+    # Like `append_row(*values)`, but takes any `Enumerable` of `CellValue`.
     def append_row(values : Enumerable)
       cells = {} of Int32 => Cell
       values.each_with_index { |v, i| cells[i + 1] = Cell.new(v.as(CellValue)) }
@@ -59,7 +57,8 @@ module XLSX
       @next_row_id += 1
     end
 
-    # Produces the immutable `Sheet`.
+    # Returns the `Sheet`. It shares this builder's storage, so later changes to
+    # the builder also change the sheet.
     def build : Sheet
       Sheet.new(@name, @rows)
     end
