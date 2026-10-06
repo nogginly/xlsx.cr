@@ -4,31 +4,31 @@ require "./internal"
 
 module XLSX
   module Internal
-    # Reads and writes XLSX ZIP archives.
+    # Reads a workbook archive into a `Document`, and writes a `Document` back,
+    # optionally over a template's archive. Each XML part is handled by its own
+    # class: `WorkbookXML`, `SharedStrings`, `StylesXML` and `SheetXML`.
     #
-    # Orchestrates `SharedStrings`, `WorkbookXML`, and `SheetXML` to
-    # assemble a `Document` from an IO source, and serialise a `Document`
-    # back to an IO destination.
-    #
-    # An XLSX file is a ZIP archive with this structure:
+    # The parts involved, with sheet paths as this shard writes them (on read,
+    # paths come from the workbook's relationships):
     # ```
     # [Content_Types].xml
     # _rels/.rels
     # xl/workbook.xml
     # xl/_rels/workbook.xml.rels
-    # xl/sharedStrings.xml
-    # xl/styles.xml
-    # xl/worksheets/sheet1.xml
-    # xl/worksheets/sheet2.xml  # one per sheet
+    # xl/sharedStrings.xml       # optional on read
+    # xl/styles.xml              # optional on read
+    # xl/worksheets/sheet1.xml   # one per sheet
     # ```
     class Zip
-      # Reads an XLSX file from *io* and returns a `Document`.
+      # Reads the workbook archive in *io* into a `Document`.
       def self.read(io : IO) : Document
         read_from_entries(collect_entries(io))
       end
 
-      # Parses a pre-collected entry map into a `Document`.
-      # Allows the caller to reuse entries for both reading and writing.
+      # Builds a `Document` from entries already read by `.collect_entries`, so a
+      # template build can read and write from one pass over the archive.
+      # Raises `KeyError` if the workbook, its relationships or a sheet part is
+      # missing, and `NilAssertionError` if a sheet has no relationship.
       def self.read_from_entries(entries : Hash(String, String)) : Document
         wb = WorkbookXML.new
         ss = SharedStrings.new
@@ -55,7 +55,8 @@ module XLSX
         Document.new(sheets)
       end
 
-      # Collects all ZIP entries from *io* into a filename → content map.
+      # Reads every entry of the archive in *io* into a map of filename to
+      # content. Binary parts are carried as `String`s of raw bytes.
       def self.collect_entries(io : IO) : Hash(String, String)
         entries = {} of String => String
         ::Compress::Zip::Reader.open(io) do |zip|
@@ -66,14 +67,20 @@ module XLSX
         entries
       end
 
-      # Writes *document* as an XLSX file to *io*.
+      # Writes *document* to *io* as a new workbook.
       def self.write(io : IO, document : Document) : Nil
         write_impl(io, document, template_entries: nil)
       end
 
-      # Writes *document* to *io*, using *template_entries* as a baseline.
-      # All entries from the template are carried over verbatim; only the
-      # entries we manage are replaced.
+      # Writes *document* to *io* over the parts of a template:
+      #
+      # - Sheets are written as `xl/worksheets/sheetN.xml`, each patched into the
+      #   template sheet of the same name.
+      # - The workbook, its relationships and `[Content_Types].xml` are patched
+      #   for the new sheet list; the shared string table is rebuilt.
+      # - `_rels/.rels`, `xl/styles.xml` and every other part are copied
+      #   unchanged, except that everything else under `xl/worksheets/`
+      #   (including sheet relationships) and `xl/calcChain.xml` is dropped.
       def self.write_with_template(io : IO, document : Document,
                                    template_entries : Hash(String, String)) : Nil
         write_impl(io, document, template_entries: template_entries)
@@ -84,7 +91,7 @@ module XLSX
         ss = SharedStrings.new
         sx = SheetXML.new
 
-        # Parse template workbook once so we can look up sheet targets below.
+        # Template sheet names to parts, to find the XML each sheet is patched into.
         template_wb = template_entries.try do |entries|
           wb = WorkbookXML.new
           wb.parse_workbook(entries["xl/workbook.xml"]) if entries["xl/workbook.xml"]?
@@ -92,8 +99,8 @@ module XLSX
           wb
         end
 
-        # Pre-build all sheet XML so strings are interned before we write
-        # the shared string table.
+        # Every sheet's XML is built before the shared string table is written,
+        # so the table holds every string the sheets intern.
         template_styles = StylesXML.new
         if raw_styles = template_entries.try(&.["xl/styles.xml"]?)
           template_styles.parse(raw_styles)
@@ -112,7 +119,8 @@ module XLSX
         sheet_names = sheet_xmls.map(&.[0])
         wb = WorkbookXML.new
 
-        # Entries we always generate — these overwrite any template values.
+        # Parts this shard writes, each replacing the template's part of the same
+        # name. `_rels/.rels` and `styles.xml` are the template's own if present.
         managed = {
           "[Content_Types].xml"        => build_content_types(sheet_names, template_entries),
           "_rels/.rels"                => template_entries.try(&.["_rels/.rels"]?) || build_root_rels,
@@ -127,9 +135,10 @@ module XLSX
         end
 
         ::Compress::Zip::Writer.open(io) do |zip|
-          # Write all template entries not managed by us.
-          # calcChain.xml is intentionally excluded — Excel regenerates it
-          # on open, and our modified sheet data would make it stale/invalid.
+          # Copy the template's other parts. Worksheets are skipped because they
+          # are rewritten under new names. The calculation chain is skipped
+          # because it would be stale against changed sheet data and Excel
+          # rebuilds it on open; its relationship in the workbook is not removed.
           if template_entries
             template_entries.each do |filename, content|
               next if managed.has_key?(filename)
@@ -139,19 +148,14 @@ module XLSX
             end
           end
 
-          # Write our managed entries.
           managed.each do |filename, content|
             add(zip, filename, content)
           end
         end
       end
 
-      # ------------------------------------------------------------------
-      # Convenience: write from a flat rows array (CSV-compatible Builder)
-      # ------------------------------------------------------------------
-
-      # Writes a single-sheet XLSX from *rows* to *io*.
-      # *sheet_name* defaults to "Sheet1".
+      # Writes a single-sheet workbook of *rows* to *io*, each row starting at
+      # column 1.
       def self.write_rows(io : IO, rows : Array(Array(CellValue)),
                           sheet_name : String = "Sheet1") : Nil
         cells_map = {} of Int32 => Row
@@ -175,8 +179,8 @@ module XLSX
 
       private def self.build_content_types(sheet_names : Array(String),
                                            template_entries : Hash(String, String)?) : String
-        # Collect Override PartNames from template that we don't manage,
-        # so they are preserved in the output.
+        # Keep the template's `Override` entries for parts this shard does not
+        # write. Its `Default` entries, by file extension, are not kept.
         extra_overrides = {} of String => String # PartName => ContentType
 
         if te = template_entries
@@ -259,7 +263,8 @@ module XLSX
             xml.element("cellStyleXfs", count: "1") do
               xml.element("xf", numFmtId: "0", fontId: "0", fillId: "0", borderId: "0")
             end
-            # xf index 0: general, 1: date-only (14), 2: time-only (20), 3: date+time (22)
+            # xf 0 is General; 1, 2 and 3 are the date-only (14), time-only (20)
+            # and date-time (22) styles that `DateValue`'s factories refer to.
             xml.element("cellXfs", count: "4") do
               xml.element("xf", numFmtId: "0", fontId: "0", fillId: "0", borderId: "0", xfId: "0")
               xml.element("xf", numFmtId: "14", fontId: "0", fillId: "0", borderId: "0", xfId: "0")
