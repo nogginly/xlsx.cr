@@ -16,6 +16,9 @@ Sheets and common libraries, including writing into an incoming template
 without Excel offering to "repair" the result. Charts, pivots and macros stay
 out of scope, but a template that contains them must survive untouched.
 
+Item IDs are stable references, not ranks: within each bucket, items are
+listed worst first.
+
 ---
 
 ## MUST FIX
@@ -55,7 +58,9 @@ relationships. Two cases break:
 The fix is to compute sheet rIds once and use them for both parts. For a
 template, patch the existing `<sheet>` elements rather than rebuilding them,
 which also keeps `state="hidden"`, the original `sheetId` and any other
-attributes (all currently lost).
+attributes (all currently lost). The same applies to the relationships file:
+`build_rels` keeps only each relationship's `Id`, `Type` and `Target`, so an
+attribute such as `TargetMode="External"` is dropped.
 
 ### M4. Sheet-level parts and relationships are dropped
 
@@ -80,6 +85,16 @@ The part is excluded on write, but its relationship in
 dangling reference. The fix is to drop the relationship too. Also set
 `<calcPr fullCalcOnLoad="1"/>` whenever a template is modified, because
 formulas over appended rows would otherwise show stale cached values.
+
+### M17. `SheetBuilder#rows` discards existing rows
+
+Each row in the span starts as an empty `RowBuilder` and replaces whatever row
+had that ID. In a template, `sheet.rows(3..10) { |row, _| row[2] = 42.0 }`
+erases every other cell in rows 3 to 10, plus their style, height and other
+row attributes. Filling values into a formatted template is the main reason
+to use one, so this is silent template damage. The fix is to start each
+`RowBuilder` from the existing row's cells and attributes, with an explicit
+way to clear a row. Predicted by reading.
 
 ### M7. Rich-text shared strings shift every later index
 
@@ -151,12 +166,33 @@ appended rows vanish without an error. At minimum, raise when the pattern does
 not match exactly once. Better, locate the element by parsing and splice by
 byte offset.
 
+### M19. Malformed XML parts read as partial data
+
+Every part is parsed with `XML.parse`'s defaults, which include libxml's
+`RECOVER` flag. A truncated or corrupt sheet therefore yields whatever
+parsed, with no error, and a template build writes that back as the sheet.
+The fix is to parse without `RECOVER` (keeping `NONET`) and let `XML::Error`
+propagate with the part's name. Predicted by reading.
+
 ### M15. Sheet names are not validated
 
 Excel rejects names longer than 31 characters, names containing
 `[ ] : * ? / \`, names starting or ending with `'`, and duplicates compared
 case-insensitively. `XLSX.build(io, sheets: [...])` writes them anyway and
-Excel offers a repair. The fix is to raise `ArgumentError` at build time.
+Excel offers a repair. An empty `sheets` array writes a workbook with no
+sheets, which Excel also rejects. The fix is to raise `ArgumentError` at
+build time.
+
+### M18. Builders reject plain integers and `Time`
+
+`CellValue` has `Int64` but not `Int32`, and no `Time`. A call like
+`b.row("Alice", 30)` or `sheet.append_row("Row #{i}A", i)` with an `Int32`
+matches no overload and does not compile, nor does
+`sheet.append_row("Date", Time.utc)`. Three README examples do exactly this,
+and the specs and samples avoid it (`30.0`, `8.to_i64`). Accepting any `Int`
+and `Time` (as a date-time `DateValue`) at the builder boundary is cheap now
+and a breaking change later. Predicted by reading; a spec that calls
+`append_row` with an `Int32` confirms it.
 
 ### M16. `csv2xlsx` writes booleans as text
 
@@ -206,6 +242,12 @@ parsed as a DOM. Images and `vbaProject.bin` live in `String`s, which works by
 accident. Store entries as `Bytes`, stream sheet XML with `XML::Reader` on
 read, and stream rows on write for large files.
 
+Reading uses `Compress::Zip::Reader`, which walks local file headers and
+ignores the central directory. A stored (uncompressed) entry whose sizes are
+only in a trailing data descriptor reads as empty, and a non-ZIP input reads
+as an archive with no entries. `Compress::Zip::File` reads the central
+directory, at the cost of needing a seekable `IO`.
+
 ### W7. Typed read accessors
 
 Callers pattern-match a 10-way union for every cell. Add helpers such as
@@ -228,6 +270,9 @@ beyond 2^53 lose precision silently. Raise or document, then decide.
 - **Precision.** Sub-second values are truncated on write.
 - **Heuristic false positives.** `date_format_code?` treats `[Red]0.00` and
   `[$-409]` as dates; bracketed sections should be skipped like quoted ones.
+- **Locale-specific built-ins.** Formats 27-36 and 50-58, used by East Asian
+  editions of Excel for dates, are not recognised, so those dates read as
+  numbers.
 
 ### W10. Package tidiness
 
@@ -245,6 +290,15 @@ template becoming an `.xlsx` is the desired outcome. An `.xlsm` template keeps
 `vbaProject.bin` under a non-macro content type and will not open. Decide
 whether to preserve the original type or refuse macro-enabled templates.
 
+### W14. Built values share builder storage
+
+`RowBuilder#build` and `SheetBuilder#build` hand their own hashes to the
+`Row` and `Sheet` they return, and `Row#attrs` returns its hash directly, so
+a built value changes if the builder or caller keeps going. `Builder#close`
+writes a complete archive each time it is called. Neither bites through
+`XLSX.build`; both can through the public builder classes. Copy on build,
+freeze or document, then decide.
+
 ### W12. Strict OOXML
 
 The `purl.oclc.org/ooxml` namespaces read as an empty workbook. After M14 this
@@ -252,8 +306,10 @@ should at least raise, and full support can come later.
 
 ### W13. Housekeeping
 
-- **Stale doc comments.** `XLSX.build(sheets:)` still mentions
-  `NotImplementedError`, `SheetXML#build` documents a nonexistent
-  `template_row_ids`, and `DEFAULT_*_STYLE` describes xf indices as `numFmtId`s.
+- **Non-ASCII trailing comments.** `StylesXML#initialize` and
+  `SheetXML#formula_type_and_value` each have a trailing comment with an
+  arrow. Trailing comments sit on code lines, so they are outside the
+  comment-only cleanup and need their own commit.
 - **README.** Section numbering starts at 2, and example 2.2 leaks a `File`.
-- **CI.** `ameba` is disabled.
+- **Ameba baseline.** `.ameba.yml` mutes existing findings per rule and file.
+  Remove each exclusion as its findings are fixed.
