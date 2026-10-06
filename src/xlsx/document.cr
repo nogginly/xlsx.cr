@@ -1,14 +1,18 @@
 module XLSX
-  # An XLSX document containing one or more worksheets.
+  # A workbook: its worksheets, in the order the workbook lists them.
   class Document
-    # Opens an XLSX document from a file path.
+    # Reads the whole workbook at *path* into memory. See `.open(io)` for errors.
     def self.open(path : String) : self
       File.open(path, "r") do |io|
         open(io)
       end
     end
 
-    # Opens an XLSX document from an `IO` source.
+    # Reads the whole workbook from *io* into memory; *io* is not closed.
+    #
+    # Raises `KeyError` when a part this shard needs is missing, which is also
+    # how data that is not a ZIP archive usually fails. Malformed XML inside a
+    # part does not raise: the parser recovers what it can.
     def self.open(io : IO) : self
       Internal::Zip.read(io)
     end
@@ -28,7 +32,7 @@ module XLSX
         raise KeyError.new("No sheet named #{name.inspect}")
     end
 
-    # Returns the sheet at the given 0-based *index*.
+    # Returns the sheet at the 0-based *index*. Raises `IndexError` if out of range.
     def [](index : Int32) : Sheet
       @sheets[index]
     end
