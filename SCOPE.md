@@ -188,8 +188,9 @@ build time.
 `CellValue` has `Int64` but not `Int32`, and no `Time`. A call like
 `b.row("Alice", 30)` or `sheet.append_row("Row #{i}A", i)` with an `Int32`
 matches no overload and does not compile, nor does
-`sheet.append_row("Date", Time.utc)`. Three README examples do exactly this,
-and the specs and samples avoid it (`30.0`, `8.to_i64`). Accepting any `Int`
+`sheet.append_row("Date", Time.utc)`. The specs and samples avoid it
+(`30.0`, `8.to_i64`), and the README now converts explicitly (`30_i64`,
+`to_i64`); simplify its examples once this is fixed. Accepting any `Int`
 and `Time` (as a date-time `DateValue`) at the builder boundary is cheap now
 and a breaking change later. Predicted by reading; a spec that calls
 `append_row` with an `Int32` confirms it.
@@ -310,6 +311,5 @@ should at least raise, and full support can come later.
   `SheetXML#formula_type_and_value` each have a trailing comment with an
   arrow. Trailing comments sit on code lines, so they are outside the
   comment-only cleanup and need their own commit.
-- **README.** Section numbering starts at 2, and example 2.2 leaks a `File`.
 - **Ameba baseline.** `.ameba.yml` mutes existing findings per rule and file.
   Remove each exclusion as its findings are fixed.
