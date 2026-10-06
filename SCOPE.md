@@ -185,15 +185,22 @@ build time.
 
 ### M18. Builders reject plain integers and `Time`
 
-`CellValue` has `Int64` but not `Int32`, and no `Time`. A call like
-`b.row("Alice", 30)` or `sheet.append_row("Row #{i}A", i)` with an `Int32`
-matches no overload and does not compile, nor does
-`sheet.append_row("Date", Time.utc)`. The specs and samples avoid it
-(`30.0`, `8.to_i64`), and the README now converts explicitly (`30_i64`,
-`to_i64`); simplify its examples once this is fixed. Accepting any `Int`
-and `Time` (as a date-time `DateValue`) at the builder boundary is cheap now
-and a breaking change later. Predicted by reading; a spec that calls
-`append_row` with an `Int32` confirms it.
+Confirmed with `crystal eval` against `Builder#row`:
+
+- **`Int32`.** `b.row("A", 30)` fails with "ambiguous call, implicit cast of
+  30 matches all of Float64, Int64". An `Int32` variable fails the same way,
+  since Crystal autocasts number variables as well as literals.
+- **`Time`.** `b.row("A", Time.utc)` fails with "no overload matches".
+
+`SheetBuilder#append_row` and `RowBuilder#[]=` take the same `CellValue`
+restriction, so they fail the same way. The specs and samples avoid both
+forms (`30.0`, `8.to_i64`), and the README converts explicitly (`30_i64`,
+`to_i64`); simplify its examples once this is fixed.
+
+The fix is to convert at the builder boundary: any `Int` to `Int64` and a
+`Time` to a date-time `DateValue`. Adding `Int32` to `CellValue` alone does
+not work, since an autocast would still be ambiguous for other integer types.
+Fixing it is cheap now and a breaking change later.
 
 ### M16. `csv2xlsx` writes booleans as text
 

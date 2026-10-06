@@ -73,6 +73,8 @@ the current SCOPE item touches, and its spec under `spec/unit/`.
   (`i`, `j`, `k`, `e`).
 - **Small verified steps.** Split a change that alters both structure and
   behaviour into two commits.
+- **Markdown tables have no leading or trailing pipes**, e.g.
+  `Command |Description`, matching the user's edits to README and DEVELOPMENT.
 - **Diagrams are Mermaid only**, offered as standalone `.mermaid` files.
 - **Number any decision questions**, so the user can answer by number.
 - **Keep `SCOPE.md` and this file current.** Delete finished SCOPE items, add new
@@ -97,7 +99,8 @@ alternatives that were rejected and the reasoning that the code cannot show.
   DEVELOPMENT were brought into line afterwards; README examples avoid
   `Int32` and `Time` values (SCOPE M18) and name no variable `out`.
 - No behaviour has changed since the baseline. All known defects are in
-  `SCOPE.md`, predicted by reading; only M2 is confirmed against stdlib source.
+  `SCOPE.md`, predicted by reading, except M2 (confirmed against stdlib
+  source) and M18 (confirmed with `crystal eval`).
 - The specs only round-trip through this shard's own writer, so they do not
   prove compatibility with Excel or other producers.
 
@@ -105,19 +108,11 @@ alternatives that were rejected and the reasoning that the code cannot show.
 
 See `SCOPE.md` for the full list. Next, in order:
 
-1. **Confirm M18** from the repo root; each should fail with "no overload
-   matches":
-
-   ```sh
-   crystal eval 'require "./src/xlsx"; XLSX.build(IO::Memory.new) { |b| b.row("A", 30) }'
-   crystal eval 'require "./src/xlsx"; i = 3; XLSX.build(IO::Memory.new) { |b| b.row("A", i) }'
-   crystal eval 'require "./src/xlsx"; XLSX.build(IO::Memory.new) { |b| b.row("A", Time.utc) }'
-   ```
-2. **SCOPE M1** -- fixtures and an external validity check, so every later fix
+1. **SCOPE M1** -- fixtures and an external validity check, so every later fix
    lands with a reproduction. Needs real files from the user, ideally the
    template that showed the original problem.
-3. **Then M2 to M6 and M17**, the template-write integrity group.
-4. **Decisions pending from the user**, which shape M8, M10 and the scope
+2. **Then M2 to M6 and M17**, the template-write integrity group.
+3. **Decisions pending from the user**, which shape M8, M10 and the scope
    boundary:
    1. Add an `ErrorValue` member to `CellValue` (widens the union), or represent
       errors differently?
@@ -151,3 +146,8 @@ See `SCOPE.md` for the full list. Next, in order:
 - **Specs that dodge a natural call are a hint.** Every spec wrote `30.0` or
   `8.to_i64`, never `30`, which is how M18 surfaced. When tests avoid the
   obvious form, find out why.
+- **`crystal eval` settles a compile-time question in one command.** Use it
+  when a defect depends on what the compiler accepts, rather than reasoning
+  about overloads and autocasting. Crystal autocasts `Int32` variables, not
+  just literals, and a restriction with both `Int64` and `Float64` makes that
+  cast ambiguous.
