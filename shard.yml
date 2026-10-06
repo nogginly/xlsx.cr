@@ -1,10 +1,9 @@
 name: xlsx
 version: 0.2.0
+license: MPL-2.0
 
 authors:
   - nogginly <nogginly@icloud.com>
-
-license: MIT
 
 development_dependencies:
   ameba:

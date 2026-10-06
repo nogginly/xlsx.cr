@@ -14,7 +14,8 @@ Clone the repo and read files before editing. Never edit stale in-memory copies.
 2. `SCOPE.md` -- the worklist. MUST FIX items are taken in order unless the
    user says otherwise. Completed items are deleted, not ticked.
 3. `README.md` -- public API as users see it.
-4. `DEVELOPMENT.md` and `ops.yml` -- how the user builds, tests and lints.
+4. `DEVELOPMENT.md`, `ops.yml` and `.ameba.yml` -- how the user builds, tests
+   and lints, and how the code fits together.
 5. `DISCLOSURE.md` -- this is a Level 5 project: the user must understand every
    line, so explain reasoning, not just results.
 6. `src/xlsx.cr` -- the three `XLSX.build` overloads, the entry points.
@@ -30,7 +31,7 @@ the current SCOPE item touches, and its spec under `spec/unit/`.
 ## Standing instructions
 
 - **No toolchain installs. No compile, run, test or lint.** Write code and specs;
-  the user runs `ops test` and `ops lint` and reports output. The user does all
+  the user runs `ops test` (specs, debug build and lint) and reports output. The user does all
   editing decisions, PRs, pushes and merges.
 - **Read before writing.** Clone, read the relevant file, then edit. After any
   push or merge, pull before editing again. Since the user does all the real
@@ -53,19 +54,27 @@ the current SCOPE item touches, and its spec under `spec/unit/`.
   method produces; inside a method, only the steps of the algorithm. No change
   history or "how we got here" -- that belongs in commits and PRs.
 - **ASCII only in comments.** `->` not arrows, `--` not em-dashes. String
-  literals and Markdown prose are exempt. Existing comments in `src/` predate
-  this rule; convert them in files a change already touches.
+  literals and Markdown prose are exempt. Two trailing comments still carry
+  arrows (SCOPE W13).
+- **Comments describe current behaviour, limitations included**, without
+  pointing at SCOPE items. A fix updates the comment that describes the
+  limitation in the same commit. Comment-only changes are checked with the
+  `crystal-comment-cleanup` skill's `check_unchanged.py` and committed apart
+  from code changes.
 - **All regexes in private named constants** inside the relevant class. Specs are
   exempt; inline regexes are the convention there. Two inline regexes remain in
   `SheetXML#build` and `WorkbookXML#patch_sheets_element`; both are slated for
   replacement by SCOPE M14.
-- **Ameba** is the target. No new `not_nil!` (one remains in
+- **Ameba** must pass, and runs in CI. `.ameba.yml` is a baseline muting
+  findings that predate it, per rule and file: never add an exclusion, and
+  remove one when its findings are fixed. No new `not_nil!` (one remains in
   `Zip.read_from_entries`, removed by SCOPE M13); cyclomatic complexity <= 10;
   block parameter names must be descriptive or on Ameba's allowed short list
-  (`i`, `j`, `k`, `e`). Ameba is disabled in CI because existing code does not
-  pass yet; new and touched code must not add findings.
+  (`i`, `j`, `k`, `e`).
 - **Small verified steps.** Split a change that alters both structure and
   behaviour into two commits.
+- **Markdown tables have no leading or trailing pipes**, e.g.
+  `Command |Description`, matching the user's edits to README and DEVELOPMENT.
 - **Diagrams are Mermaid only**, offered as standalone `.mermaid` files.
 - **Number any decision questions**, so the user can answer by number.
 - **Keep `SCOPE.md` and this file current.** Delete finished SCOPE items, add new
@@ -83,27 +92,26 @@ alternatives that were rejected and the reasoning that the code cannot show.
 
 ## Where things stand
 
-- Version 0.2.0 (`shard.yml`). Baseline commit `f7386fd` on `main`, plus this
-  file and `SCOPE.md`.
-- Reading, from-scratch writing (single and multi-sheet) and template writing all
-  exist and pass their specs. The specs only round-trip through this shard's own
-  writer, so they do not prove compatibility with Excel or other producers.
-- The user has seen template-based writes produce files with compatibility
-  problems. The analysis in `SCOPE.md` names the likely causes; none has been
-  reproduced yet.
-- Confirmed against Crystal's stdlib: `XML::Node#name` on an attribute returns
-  the local name, so `SheetXML#node_attrs` drops prefixes such as `x14ac:` (M2).
-  Everything else in SCOPE comes from reading the code; none of it has been run.
-- No code has changed since the baseline.
+- Version 0.2.0 (`shard.yml`). Work is on the branch
+  `cleaning-up-the-comments-and-docs`, not yet merged to `main`.
+- The comment cleanup of `src/` is done: every comment describes current
+  behaviour, checked against the source and Crystal's stdlib. README and
+  DEVELOPMENT were brought into line afterwards; README examples avoid
+  `Int32` and `Time` values (SCOPE M18) and name no variable `out`.
+- No behaviour has changed since the baseline. All known defects are in
+  `SCOPE.md`, predicted by reading, except M2 (confirmed against stdlib
+  source) and M18 (confirmed with `crystal eval`).
+- The specs only round-trip through this shard's own writer, so they do not
+  prove compatibility with Excel or other producers.
 
 ### Open work
 
-1. **SCOPE M1 first** -- fixtures and an external validity check, so every later
-   fix lands with a reproduction. Needs real files from the user, ideally the
-   template that showed the original problem, plus files saved by LibreOffice and
-   Google Sheets.
-2. **Then M2 to M6**, the template-write integrity group. These are the likely
-   causes of Excel's repair prompt.
+See `SCOPE.md` for the full list. Next, in order:
+
+1. **SCOPE M1** -- fixtures and an external validity check, so every later fix
+   lands with a reproduction. Needs real files from the user, ideally the
+   template that showed the original problem.
+2. **Then M2 to M6 and M17**, the template-write integrity group.
 3. **Decisions pending from the user**, which shape M8, M10 and the scope
    boundary:
    1. Add an `ErrorValue` member to `CellValue` (widens the union), or represent
@@ -132,3 +140,14 @@ alternatives that were rejected and the reasoning that the code cannot show.
 - **Self-round-trip specs hide symmetric bugs.** A misreading on parse and a
   matching mistake on write cancel out. Compatibility claims need fixtures
   produced by other software.
+- **Deleting a banner comment can leave two blank lines in a row.**
+  `crystal tool format` collapses them, so CI's format check fails. Remove the
+  extra blank in the same commit; the comment checker ignores blank lines.
+- **Specs that dodge a natural call are a hint.** Every spec wrote `30.0` or
+  `8.to_i64`, never `30`, which is how M18 surfaced. When tests avoid the
+  obvious form, find out why.
+- **`crystal eval` settles a compile-time question in one command.** Use it
+  when a defect depends on what the compiler accepts, rather than reasoning
+  about overloads and autocasting. Crystal autocasts `Int32` variables, not
+  just literals, and a restriction with both `Int64` and `Float64` makes that
+  cast ambiguous.

@@ -4,18 +4,19 @@ require "html"
 
 module XLSX
   module Internal
-    # Parses and builds `xl/workbook.xml` and `xl/_rels/workbook.xml.rels`.
+    # Reads and writes `xl/workbook.xml` and `xl/_rels/workbook.xml.rels`.
     #
-    # When a template is provided, both files are patched rather than
-    # regenerated — preserving all non-sheet content (namespaces, calcPr,
-    # bookViews, extLst, non-worksheet relationships, etc.)
+    # With a template, the workbook keeps everything but its `<sheets>`
+    # element (namespaces, `calcPr`, `bookViews`, `definedNames`, `extLst`), and
+    # the relationships keep every non-worksheet entry's Id, Type and Target.
     class WorkbookXML
-      # Ordered list of {name, r:id} pairs as declared in workbook.xml.
+      # A sheet's name and relationship ID, as listed in `workbook.xml`.
       record SheetRef, name : String, rid : String
 
       getter sheet_refs : Array(SheetRef)
 
-      # Maps r:id → relative file path within xl/ (e.g. "worksheets/sheet1.xml").
+      # Worksheet relationship IDs to their targets, normally relative to `xl/`,
+      # e.g. "worksheets/sheet1.xml".
       getter rid_to_target : Hash(String, String)
 
       def initialize
@@ -23,7 +24,7 @@ module XLSX
         @rid_to_target = Hash(String, String).new
       end
 
-      # Parses `xl/workbook.xml`.
+      # Reads the sheet list, in order, from `xl/workbook.xml`.
       def parse_workbook(xml : String) : Nil
         doc = XML.parse(xml)
         doc.xpath_nodes("//wb:workbook/wb:sheets/wb:sheet", WB_NS_MAP).each do |node|
@@ -33,7 +34,8 @@ module XLSX
         end
       end
 
-      # Parses `xl/_rels/workbook.xml.rels`.
+      # Reads the worksheet relationships from `xl/_rels/workbook.xml.rels`,
+      # ignoring all others.
       def parse_rels(xml : String) : Nil
         doc = XML.parse(xml)
         doc.xpath_nodes("//pr:Relationships/pr:Relationship", RELS_NS_MAP).each do |node|
@@ -50,15 +52,16 @@ module XLSX
         @rid_to_target[ref.rid]?
       end
 
-      # Ordered sheet names as declared in `workbook.xml`.
+      # Returns the sheet names in workbook order.
       def sheet_names : Array(String)
         @sheet_refs.map(&.name)
       end
 
-      # Builds `xl/workbook.xml`.
-      # When *template_xml* is given, only the `<sheets>` element is replaced;
-      # all other content (namespaces, calcPr, bookViews, extLst, etc.) is
-      # preserved verbatim via string substitution.
+      # Returns `xl/workbook.xml` listing *sheet_names*. Sheet *n* gets
+      # `sheetId` *n* and `r:id` `rId`*n*, which can differ from the ID
+      # `build_rels` assigns it. Given *template_xml*, returns it with its
+      # `<sheets>` element replaced; other attributes of the template's sheets,
+      # such as `state="hidden"`, are not kept.
       def build_workbook(sheet_names : Array(String),
                          template_xml : String? = nil) : String
         if raw = template_xml
@@ -77,12 +80,12 @@ module XLSX
         end
       end
 
-      # Builds `xl/_rels/workbook.xml.rels`.
-      # When *template_xml* is given, non-worksheet relationships are preserved;
-      # only the worksheet `Relationship` entries are replaced.
+      # Returns `xl/_rels/workbook.xml.rels` relating *sheet_names*, in order, to
+      # `worksheets/sheetN.xml`. Given *template_xml*, its non-worksheet
+      # relationships are kept and worksheet IDs are chosen around them.
       def build_rels(sheet_names : Array(String),
                      template_xml : String? = nil) : String
-        # Collect non-worksheet relationships from the template.
+        # Non-worksheet relationships to keep.
         preserved = [] of {String, String, String} # {Id, Type, Target}
         if raw = template_xml
           doc = XML.parse(raw)
@@ -91,12 +94,12 @@ module XLSX
             preserved << {node["Id"], node["Type"], node["Target"]}
           end
         else
-          # From-scratch: always include the standard non-worksheet relationships.
+          # A new workbook relates its shared strings and styles as rId10 and rId11.
           preserved << {"rId10", SHARED_STRINGS_TYPE, "sharedStrings.xml"}
           preserved << {"rId11", STYLES_TYPE, "styles.xml"}
         end
 
-        # Assign new rIds for worksheets, avoiding collisions with preserved ones.
+        # Worksheet IDs, probing upward from rId1 past any already in use.
         used_ids = preserved.map(&.[0]).to_set
         sheet_rels = sheet_names.each_with_index.map do |_, i|
           rid = next_rid(used_ids, i + 1)
@@ -124,14 +127,14 @@ module XLSX
         end
       end
 
-      # Replaces the <sheets>...</sheets> content in *xml* with *sheets_xml*.
-      # Uses a simple regex since the sheets block is self-contained.
+      # Returns *xml* with its `<sheets>...</sheets>` replaced by *sheets_xml*,
+      # or unchanged if that exact markup is absent, as with a namespace prefix
+      # or an empty `<sheets/>`.
       private def patch_sheets_element(xml : String, sheets_xml : String) : String
         xml.gsub(/<sheets>.*?<\/sheets>/m, sheets_xml)
       end
 
-      # Returns an rId string that doesn't collide with *used*.
-      # Starts probing from *hint*.
+      # Returns the first of `rId`*hint*, `rId`*hint+1*, ... not in *used*.
       private def next_rid(used : Set(String), hint : Int32) : String
         n = hint
         loop do

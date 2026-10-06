@@ -2,13 +2,10 @@ require "./internal"
 
 module XLSX
   module Internal
-    # Manages the shared string table (`xl/sharedStrings.xml`).
-    #
-    # In XLSX, all string cell values are stored here rather than inline.
-    # A cell with `t="s"` holds an integer index into this table.
-    #
-    # On read:  parse the XML once, look up strings by index.
-    # On write: intern strings as they are encountered, emit XML at the end.
+    # The shared string table, `xl/sharedStrings.xml`: each distinct string once,
+    # referred to by index from cells with `t="s"`. Reading parses the table
+    # once and looks strings up by index; writing interns strings as sheets are
+    # built and emits the table last.
     class SharedStrings
       def initialize
         @strings = Array(String).new
@@ -21,8 +18,7 @@ module XLSX
         @strings[index]
       end
 
-      # Interns *value*, returning its index.
-      # Repeated calls with the same value return the same index.
+      # Returns the index of *value*, adding it to the table if it is new.
       def intern(value : String) : Int32
         @index.fetch(value) do
           idx = @strings.size
@@ -31,22 +27,24 @@ module XLSX
         end
       end
 
-      # Returns the total number of unique strings.
+      # Returns the number of distinct strings.
       def size : Int32
         @strings.size
       end
 
-      # Parses a `sharedStrings.xml` document into this table.
+      # Appends the strings of a `sharedStrings.xml` document to this table.
+      # Only an `<si>`'s direct `<t>` is read: a rich-text entry made of runs
+      # (`<r>`) adds nothing, so every later index is off.
       def parse(xml : String) : Nil
         doc = XML.parse(xml)
         doc.xpath_nodes("//ns:sst/ns:si/ns:t", MAIN_NS_MAP).each do |elem_t|
-          # <t> holds the value; preserve whitespace via xml:space if present
+          # Whitespace is kept as written; `xml:space` is not consulted.
           @strings << (elem_t ? elem_t.content : "")
         end
         @strings.each_with_index { |s, i| @index[s] = i }
       end
 
-      # Serialises the table to `sharedStrings.xml` content.
+      # Returns the table as `sharedStrings.xml` content.
       def to_xml : String
         XML.build(indent: "  ") do |xml|
           xml.element("sst",

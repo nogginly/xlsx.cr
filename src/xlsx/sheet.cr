@@ -1,16 +1,13 @@
 module XLSX
-  # A single worksheet within a document.
-  #
-  # Rows are stored sparsely: only rows present in the XML exist here.
-  # Row IDs are 1-based, matching Excel's row numbering.
+  # One worksheet of a document. Rows are stored sparsely: only rows present
+  # in the sheet XML exist. Row IDs are 1-based, as in Excel.
   class Sheet
     getter name : String
 
     def initialize(@name : String, @rows : Hash(Int32, Row))
     end
 
-    # Yields each present row and its 1-based row ID, in row order.
-    # Absent rows are skipped.
+    # Yields each present row and its row ID, in row order.
     def each_row(& : Row, Int32 ->)
       @rows.keys.sort.each do |row_id|
         yield @rows[row_id], row_id
