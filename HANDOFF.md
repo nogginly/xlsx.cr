@@ -92,8 +92,8 @@ alternatives that were rejected and the reasoning that the code cannot show.
 
 ## Where things stand
 
-- Version 0.2.0 (`shard.yml`). Work is on the branch
-  `cleaning-up-the-comments-and-docs`, not yet merged to `main`.
+- Version 0.2.0 (`shard.yml`). `main` holds all work so far; the comment and
+  docs cleanup was squash-merged as PR #1.
 - The comment cleanup of `src/` is done: every comment describes current
   behaviour, checked against the source and Crystal's stdlib. README and
   DEVELOPMENT were brought into line afterwards; README examples avoid
