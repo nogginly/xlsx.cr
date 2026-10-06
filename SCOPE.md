@@ -104,8 +104,7 @@ equivalent) that round-trips, and parse `d` to `DateValue`.
 - **Unescaped cached text.** A formula's cached string goes into `<v>`
   unescaped, so `A & B` produces malformed XML.
 - **Missing `xml:space="preserve"`.** Shared and inline `<t>` lack it, so
-  leading and trailing spaces are not guaranteed to survive. The `InlineStr`
-  doc comment currently promises they do.
+  leading and trailing spaces are not guaranteed to survive.
 - **Control characters.** Characters such as `\u0001` are invalid in XML 1.0
   and must be written as `_x0001_`. On read, the reverse decoding applies.
 
@@ -212,6 +211,11 @@ read, and stream rows on write for large files.
 Callers pattern-match a 10-way union for every cell. Add helpers such as
 `as_s`, `as_f?` and `as_time?` on `Row`, plus an opt-in for reading integral
 floats as `Int64`.
+
+`to_s` is inconsistent across a shared formula: the master `Formula` renders
+`=SUM(A1:A3)` while each `SharedFormulaRef` renders its cached value, so a
+column of shared formulas prints one formula followed by numbers. Pick one
+rendering, either the cached value or the formula, for both types.
 
 ### W8. Numeric edge cases
 
