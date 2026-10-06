@@ -49,8 +49,8 @@ module XLSX
   #
   # ```
   # File.open("template.xlsx") do |template|
-  #   File.open("output.xlsx", "w") do |out|
-  #     XLSX.build(out, template: template) do |sheet|
+  #   File.open("output.xlsx", "w") do |output|
+  #     XLSX.build(output, template: template) do |sheet|
   #       sheet.append_row("2026-04-19", 99.5, "USD")
   #     end
   #   end
