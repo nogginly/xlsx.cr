@@ -163,6 +163,6 @@ See [DEVELOPMENT](./DEVELOPMENT.md)
 
 *With apologies*, at this time contributions are *by invitation only* and limited to people I know and see often.
 
-These are early days for _AskElelem_ and I am busy with family and work.
+These are early days for _XLSX_ and I am busy with family and work.
 
 At this time I want to work on this at a manageable pace.
