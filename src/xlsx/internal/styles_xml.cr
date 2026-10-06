@@ -2,40 +2,40 @@ require "./internal"
 
 module XLSX
   module Internal
-    # Parses `xl/styles.xml` to identify which cell format (`xf`) indices
-    # represent date-formatted cells.
+    # Reads `xl/styles.xml` to tell which cell styles (`cellXfs` indices, the
+    # `s` attribute of a `<c>`) display a date or time, and converts between
+    # `Time` and Excel's serial numbers.
     #
-    # Excel stores dates as floating-point serial numbers. The only way to
-    # distinguish a date cell from a plain number is the `numFmtId` referenced
-    # by the cell's style index (`s` attribute on `<c>`).
+    # A date is stored as a plain number, a count of days, so its style's number
+    # format is the only thing that marks it as a date. Built-in formats that do
+    # (ECMA-376 Part 1, 18.8.30):
     #
-    # Built-in date format IDs (ECMA-376 §18.8.30):
-    #   14–17: date only  (m/d/yy, d-mmm-yy, d-mmm, mmm-yy)
-    #   18–19: time only  (h:mm AM/PM, h:mm:ss AM/PM)
-    #   20–21: time       (h:mm, h:mm:ss)
-    #   22:    date+time  (m/d/yy h:mm)
-    #   45–47: time       (mm:ss, [h]:mm:ss, mm:ss.0)
+    # - 14-17: date (short date, d-mmm-yy, d-mmm, mmm-yy)
+    # - 18-21: time (h:mm AM/PM, h:mm:ss AM/PM, h:mm, h:mm:ss)
+    # - 22: date and time (m/d/yy h:mm)
+    # - 45-47: time (mm:ss, [h]:mm:ss, mm:ss.0)
     #
-    # Custom formats (numFmtId >= 164) are detected by inspecting their
-    # formatCode for date/time pattern characters.
+    # The locale-specific built-ins (27-36, 50-58) are not recognised. Custom
+    # formats (ID 164 and up) are recognised by the characters in their code.
     class StylesXML
       NS_MAP = {"ns" => MAIN_NS}
 
-      # Built-in numFmtId values used by default DateValue factory methods.
-      # These correspond to the first xf index in minimal_styles that uses
-      # each format — index 1 for date-only, 2 for time-only, 3 for date+time.
+      # Indices of the date-only, time-only and date-time styles in the
+      # stylesheet `Zip` writes for a new workbook, used by `DateValue`'s
+      # factories. In a template's stylesheet they may name other styles.
       DEFAULT_DATE_STYLE      = 1
       DEFAULT_TIME_STYLE      = 2
       DEFAULT_DATE_TIME_STYLE = 3
 
-      # Date-only and date+time built-in format IDs.
+      # Built-in format IDs that display a date, a time or both.
       BUILTIN_DATE_FORMAT_IDS = Set{14, 15, 16, 17, 18, 19, 20, 21, 22, 45, 46, 47}
 
       # Characters in a format code that indicate a date/time format.
       DATE_FORMAT_CHARS = {'y', 'm', 'd', 'h', 's'}
 
-      # Whether the workbook uses the 1904 date system (legacy Mac).
-      # Affects the epoch used for serial number conversion.
+      # Whether serial numbers count from 1904 (legacy Mac workbooks) rather
+      # than 1900. `Zip` never sets it, so every workbook is read and written
+      # in the 1900 system.
       getter date1904 : Bool
 
       def initialize(@date1904 : Bool = false)
@@ -43,17 +43,16 @@ module XLSX
         @custom_formats = {} of Int32 => String # numFmtId → formatCode
       end
 
-      # Returns true if *xf_index* (the `s` attribute on a `<c>` element)
-      # refers to a date-formatted cell format.
+      # Whether the style at *xf_index* displays a date or time.
       def date_format?(xf_index : Int32) : Bool
         @date_xf_indices.includes?(xf_index)
       end
 
-      # Parses `xl/styles.xml`.
+      # Reads the date and time styles from a `styles.xml` document.
       def parse(xml : String) : Nil
         doc = XML.parse(xml)
 
-        # Collect custom number formats first.
+        # Custom formats first, since checking an xf looks its format up.
         doc.xpath_nodes("//ns:styleSheet/ns:numFmts/ns:numFmt", NS_MAP).each do |node|
           id = node["numFmtId"]?.try(&.to_i)
           code = node["formatCode"]?
@@ -68,11 +67,9 @@ module XLSX
         end
       end
 
-      # -----------------------------------------------------------------------
-      # Serial number ↔ Time conversion (wall-clock UTC semantics)
-      # -----------------------------------------------------------------------
-
-      # Converts an Excel serial number to a `Time` (UTC, wall-clock).
+      # Converts a serial number to a UTC `Time`, rounded to the second. In the
+      # 1900 system, serials before 61 (1 March 1900) come out a day early,
+      # because Excel counts a 29 February 1900 that never existed.
       def serial_to_time(serial : Float64) : Time
         epoch = date1904 ? Time.utc(1904, 1, 1) : Time.utc(1899, 12, 30)
         days = serial.to_i
@@ -81,7 +78,8 @@ module XLSX
         epoch + days.days + secs.seconds
       end
 
-      # Converts a `Time` to an Excel serial number (wall-clock, ignores offset).
+      # Converts *time* to a serial number from its wall-clock fields, ignoring
+      # its offset and anything finer than a second.
       def time_to_serial(time : Time) : Float64
         epoch = date1904 ? Time.utc(1904, 1, 1) : Time.utc(1899, 12, 30)
         wall = Time.utc(time.year, time.month, time.day,
@@ -98,8 +96,8 @@ module XLSX
         date_format_code?(code)
       end
 
-      # Heuristic: a format code is a date if it contains date/time pattern
-      # characters outside of quoted sections.
+      # Whether *code* contains a date or time character outside double quotes.
+      # Bracketed sections are not skipped, so `[Red]0.00` counts as a date.
       private def date_format_code?(code : String) : Bool
         in_quote = false
         code.each_char do |ch|
