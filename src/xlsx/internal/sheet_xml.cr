@@ -2,24 +2,18 @@ require "./internal"
 
 module XLSX
   module Internal
-    # Parses and builds individual worksheet XML files (`xl/worksheets/sheetN.xml`).
+    # Reads and writes one worksheet part, `xl/worksheets/sheetN.xml`, using
+    # `SharedStrings` to resolve and intern string values.
     #
-    # Depends on `SharedStrings` for resolving and interning string cell values.
-    #
-    # When a *template_xml* is supplied to `build`, the worksheet XML is patched
-    # rather than regenerated — preserving `<sheetViews>` (freeze panes),
-    # `<sheetFormatPr>`, `<pageMargins>`, and all other non-data elements.
-    # Existing rows retain their original XML (including style attributes);
-    # only newly appended rows are generated fresh.
+    # Writing builds every row and cell from the `Sheet`. With a template's
+    # sheet XML, only its `<sheetData>` is replaced, so everything else, such as
+    # `<sheetViews>` (freeze panes), `<cols>` and `<pageMargins>`, is kept.
     class SheetXML
       NS_MAP = {"ns" => MAIN_NS}
 
-      # Parses a worksheet XML string into a `Sheet`.
-      #
-      # *name*           — the sheet name (from workbook.xml)
-      # *xml*            — content of the worksheet XML file
-      # *shared_strings* — the shared string table for the workbook
-      # *styles*         — styles table for date format detection
+      # Parses worksheet *xml* into a `Sheet` named *name*. *shared_strings*
+      # resolves `t="s"` cells, and *styles*, if given, marks which numbers are
+      # dates. Raises `KeyError` for a row or cell without an `r` attribute.
       def parse(name : String, xml : String, shared_strings : SharedStrings,
                 styles : StylesXML? = nil) : Sheet
         rows = Hash(Int32, Row).new
@@ -73,15 +67,10 @@ module XLSX
         Sheet.new(name, rows)
       end
 
-      # Serialises a `Sheet` to worksheet XML.
-      #
-      # When *template_xml* is given, only `<sheetData>` is replaced; all other
-      # worksheet elements are preserved verbatim. Existing rows use their
-      # original stored attributes; new rows (not present in the template) are
-      # generated fresh.
-      #
-      # When *template_row_ids* is supplied, row IDs in that set are treated as
-      # existing and their stored attrs are emitted; others are treated as new.
+      # Returns *sheet* as worksheet XML. Given *template_xml*, returns it with
+      # its `<sheetData>` replaced, or unchanged if no `<sheetData>` element is
+      # matched (for example, one with a namespace prefix). *styles* converts
+      # dates to serial numbers.
       def build(sheet : Sheet, shared_strings : SharedStrings,
                 template_xml : String? = nil,
                 styles : StylesXML? = nil) : String
@@ -99,16 +88,16 @@ module XLSX
         end
       end
 
-      # -----------------------------------------------------------------------
-      # Cell reference helpers (public for testability)
-      # -----------------------------------------------------------------------
+      # Cell reference helpers, public so specs can call them directly.
 
+      # Returns the 1-based column number for *letters*: "A" is 1, "AB" is 28.
       def col_index(letters : String) : Int32
         letters.upcase.chars.reduce(0) do |acc, ch|
           acc * 26 + (ch.ord - 'A'.ord + 1)
         end
       end
 
+      # Returns the column letters for 1-based *col*: 28 is "AB".
       def col_letters(col : Int32) : String
         result = ""
         n = col
@@ -119,18 +108,19 @@ module XLSX
         result
       end
 
+      # Returns the column number of a cell reference: "AB12" is 28.
       def col_from_ref(ref : String) : Int32
         col_index(ref.chars.take_while(&.letter?).join)
       end
 
+      # Returns the cell reference for *row* and *col*: 12 and 28 are "AB12".
       def cell_ref(row : Int32, col : Int32) : String
         "#{col_letters(col)}#{row}"
       end
 
-      # -----------------------------------------------------------------------
-
-      # Builds the `<sheetData>...</sheetData>` string for *sheet*.
-      # Row and cell attrs stored on the model are re-emitted verbatim.
+      # Returns the `<sheetData>` element for *sheet*. Row and cell attributes
+      # from the model are written back, except that a cell's `t` comes from its
+      # value and a `DateValue` supplies its own `s`.
       private def build_sheet_data(sheet : Sheet, ss : SharedStrings,
                                    styles : StylesXML? = nil) : String
         String.build do |s|
@@ -215,7 +205,8 @@ module XLSX
         end
       end
 
-      # Returns {t_attribute, v_content} for a formula's cached value.
+      # Returns the `t` attribute and `<v>` text for a formula's cached value,
+      # either of which may be absent. String text is returned unescaped.
       private def formula_type_and_value(cached : CellValue,
                                          styles : StylesXML? = nil) : {String?, String?}
         case cached
@@ -229,7 +220,8 @@ module XLSX
         end
       end
 
-      # Collects all attributes from *node* except *except* into a Hash.
+      # Returns *node*'s attributes, other than *except*, by local name: a
+      # namespace prefix such as `x14ac:` is lost.
       private def node_attrs(node : XML::Node, except : String) : Hash(String, String)
         attrs = {} of String => String
         node.attributes.each do |attr|
